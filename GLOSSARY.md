@@ -66,3 +66,7 @@ _Avoid_: Feed, log
 **Patch Notes**:
 Valve's changelog for one Deadlock update, taken from Steam. Picking the patch notes channel with /setup posts every past one there, oldest first, as a log; after that each new one is posted as it comes out. Long ones continue in a thread under the post.
 _Avoid_: Changelog, update post
+
+**Bot Update**:
+A new version of The Pitboss itself, listed in CHANGELOG.md. After a restart onto a new version the bot posts the old and new version and what changed in the bot updates channel picked with /setup. Not to be confused with Patch Notes, which are Deadlock's.
+_Avoid_: Release, patch
