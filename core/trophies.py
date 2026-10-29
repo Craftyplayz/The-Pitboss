@@ -12,12 +12,13 @@ MASTERY = (["Tryout", "Regular", "Specialist", "Expert", "Master", "Grandmaster"
            [3, 10, 50, 100, 250, 500, 1000])
 
 
+# `or 0`: the API sends some numbers as null (key present), which .get(k, 0) lets through
 def _total(f):
-    return lambda ms: accumulate(f(m) for m in ms)
+    return lambda ms: accumulate(f(m) or 0 for m in ms)
 
 
 def _best(f):
-    return lambda ms: accumulate((f(m) for m in ms), max)
+    return lambda ms: accumulate((f(m) or 0 for m in ms), max)
 
 
 def _streak(want):

@@ -87,6 +87,11 @@ class MatchStats(unittest.TestCase):
         self.assertEqual(progress["dmg"], 1000)
         self.assertEqual(items, [10, 11])
 
+    def test_null_numbers_count_as_zero(self):
+        rows = [{**match_stats(meta([]), 7, ITEMS), "dmg": None, "start_time": t} for t in (1, 2)]
+        _, progress, _, _ = player_trophies([], rows, hero_count=30, item_count=2)
+        self.assertEqual(progress["dmg"], 0)
+
 
 class SavedStats(unittest.TestCase):
     def test_round_trip(self):
