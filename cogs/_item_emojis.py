@@ -1,4 +1,6 @@
-"""Item icons as Discord application emojis, uploaded the first time an item shows up in a recap."""
+"""Item and hero icons as Discord application emojis, uploaded the first time each one is shown."""
+import asyncio
+
 import aiohttp
 import discord
 
@@ -6,17 +8,27 @@ from core.shared import item_icon
 
 
 class ItemEmojis:
+    # shared by every instance (recaps, meta), so two cogs never upload the same emoji
+    by_name = None  # emoji name -> "<:name:id>"
+    lock = asyncio.Lock()
+
     def __init__(self, bot):
         self.bot = bot
-        self.by_name = None  # emoji name -> "<:name:id>"
 
     async def get(self, item):
         """Inline emoji text for an item asset dict, or "" if it can't be made."""
-        if self.by_name is None:
-            self.by_name = {e.name: str(e) for e in await self.bot.fetch_application_emojis()}
-        name = f"i{item['id']}"
-        if name not in self.by_name:
-            url = item_icon(item)
+        return await self.image(f"i{item['id']}", item_icon(item))
+
+    async def hero(self, hero):
+        """Inline emoji text for a hero asset dict, or ""."""
+        return await self.image(f"h{hero['id']}", (hero.get("images") or {}).get("icon_image_small"))
+
+    async def image(self, name, url):
+        async with ItemEmojis.lock:
+            if ItemEmojis.by_name is None:
+                ItemEmojis.by_name = {e.name: str(e) for e in await self.bot.fetch_application_emojis()}
+            if name in ItemEmojis.by_name:
+                return ItemEmojis.by_name[name]
             if not url:
                 return ""
             try:
@@ -25,7 +37,7 @@ class ItemEmojis:
                     image = await resp.read()
                 emoji = await self.bot.create_application_emoji(name=name, image=image)
             except (aiohttp.ClientError, discord.HTTPException) as e:
-                print(f"item emoji {name} failed: {e}")
+                print(f"emoji {name} failed: {e}")
                 return ""
-            self.by_name[name] = str(emoji)
-        return self.by_name[name]
+            ItemEmojis.by_name[name] = str(emoji)
+            return ItemEmojis.by_name[name]
