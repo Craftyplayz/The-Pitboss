@@ -158,7 +158,7 @@ When a new hero comes out, Diamond needs it too. Players who already have Diamon
 | Family | Bronze | Silver | Gold | Platinum | Diamond |
 |---|---|---|---|---|---|
 | **Souls per minute** (match 15+ min) | Farmer — 1,200 | Harvester — 1,400 | Soul Engine — 1,600 | Soul Storm — 1,800 | Soul Singularity — 2,000 |
-| **Match length** (win or lose) | Long Haul — 40 min | Endurance — 45 min | Marathon — 50 min | Ultramarathon — 55 min | Forever War — 60 min |
+| **Match length** (win or lose) | Long Haul — 45 min | Endurance — 55 min | Marathon — 65 min | Ultramarathon — 75 min | Forever War — 90 min |
 | **Multi-kill** \* (≤10s between kills) | Triple Kill — 3 | Quad Kill — 4 | Penta Kill — 5 | Wipeout — 6 (whole team) | — |
 | **Untouchable** (win with 0 deaths) | Clean Sheet — any win | Untouchable — 10+ K+A | Flawless — 20+ K+A | Perfection — 25+ K+A | — |
 | **Feeder** (deaths in one match) | Feeder — 12 | Soul Donor — 15 | Open Buffet — 18 | All-You-Can-Eat — 22 | — |
