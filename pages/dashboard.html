@@ -193,7 +193,8 @@ function overview(){
  </div></div></div>`}
 /* ---------- PLAYERS ---------- */
 /* ---------- trophies ---------- */
-const TC=['#cd7f32','#c0c7d0','#F0C35A','#7fd6d0','#6ab8ff','#b078e8','#ff6b6b'];  // tier colours, Bronze -> Eternal
+// tier colours, the only place they're set: Bronze, Silver, Gold, Platinum, Diamond, Master, Eternal
+const TC=['#cd7f32','#c0c7d0','#F0C35A','#7fd6d0','#6ab8ff','#b078e8','#ff6b6b'];
 // family: {cat,label,unit,tiers,th,low}; hero mastery keys are "h<hero id>" and use D.TM
 const fam=k=>{const x=D.TF[k];if(x)return {cat:x[0],label:x[1],unit:x[2],tiers:x[3],th:x[4],low:x[5],link:x[6]};const h=+k.slice(1);return {cat:'Heroes',label:hn(h)+' mastery',unit:' games',tiers:D.TM[0].map(t=>hn(h)+' '+t),th:D.TM[1],low:0,h}};
 const rar=(k,t)=>D.TR[k+':'+t]||0;
