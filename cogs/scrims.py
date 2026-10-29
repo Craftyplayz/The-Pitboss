@@ -172,22 +172,6 @@ class Scrims(commands.Cog):
     async def cog_unload(self):
         self.watch.cancel()
 
-    @app_commands.command(name="scrimlog", description="Choose the channel where finished scrims are logged.")
-    @app_commands.default_permissions(manage_guild=True)
-    @app_commands.guild_only()
-    async def scrimlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        db.set_setting(self.bot.db, "scrim_log_id", channel.id)
-        await interaction.response.defer(ephemeral=True)
-        msg = f"Finished scrims will be logged in {channel.mention}, each with a discussion thread."
-        try:
-            await lock_log_channel(channel, interaction.guild.default_role, interaction.guild.me)
-            msg += " The channel is now read-only except inside the threads."
-        except discord.Forbidden:
-            msg += ("\nI couldn't change its permissions (I need Manage Roles there). To make it read-only by hand, "
-                    "edit the channel's @everyone permissions: Send Messages off, Send Messages in Threads on, "
-                    "Create Public Threads off. Then give me Send Messages and Create Public Threads.")
-        await interaction.followup.send(msg, ephemeral=True)
-
     @app_commands.command(name="scrim", description="Start a scrim: opens a sign-up channel with a Join button.")
     @app_commands.guild_only()
     async def scrim(self, interaction: discord.Interaction):

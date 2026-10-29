@@ -8,6 +8,7 @@ from discord.ext import commands
 
 from core import db
 from core.api import APIError
+from cogs.scrims import lock_log_channel
 
 STEAM64_BASE = 76561197960265728
 URL_RE = re.compile(r"^(?:https?://)?(?:www\.)?steamcommunity\.com/profiles/(\d+)/?$", re.I)
@@ -106,16 +107,29 @@ class Link(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="setup", description="Choose the forum channel where Recap Threads are created.")
+    @app_commands.command(name="setup", description="Choose the Recap Thread forum and the scrim log channel.")
+    @app_commands.describe(recap_forum="Forum where Recap Threads are created",
+                           scrim_log="Channel where finished scrims are logged, each with a discussion thread")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.guild_only()
-    async def setup_cmd(self, interaction: discord.Interaction, recap_forum: discord.ForumChannel):
+    async def setup_cmd(self, interaction: discord.Interaction, recap_forum: discord.ForumChannel,
+                        scrim_log: discord.TextChannel):
         db.set_setting(self.bot.db, "recap_forum_id", recap_forum.id)
+        db.set_setting(self.bot.db, "scrim_log_id", scrim_log.id)
+        await interaction.response.defer(ephemeral=True)
         perms = recap_forum.permissions_for(interaction.guild.me)
         msg = f"Recaps will be posted in {recap_forum.mention}."
         if not (perms.view_channel and perms.create_public_threads and perms.send_messages_in_threads):
             msg += " Warning: I can't create posts there. Give me View Channel, Create Posts and Send Messages in Posts."
-        await interaction.response.send_message(msg, ephemeral=True)
+        msg += f"\nFinished scrims will be logged in {scrim_log.mention}, each with a discussion thread."
+        try:
+            await lock_log_channel(scrim_log, interaction.guild.default_role, interaction.guild.me)
+            msg += " The channel is now read-only except inside the threads."
+        except discord.Forbidden:
+            msg += ("\nI couldn't change its permissions (I need Manage Roles there). To make it read-only by hand, "
+                    "edit the channel's @everyone permissions: Send Messages off, Send Messages in Threads on, "
+                    "Create Public Threads off. Then give me Send Messages and Create Public Threads.")
+        await interaction.followup.send(msg, ephemeral=True)
 
     @app_commands.command(name="link", description="Link your Deadlock account to get match recaps.")
     @app_commands.describe(player="Type your Steam name and pick from the list, or give a Steam ID or profile URL")
