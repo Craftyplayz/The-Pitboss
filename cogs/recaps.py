@@ -86,6 +86,8 @@ class Recaps(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.emojis = ItemEmojis(bot)
+        self.locks = {}  # member_id -> Lock, so the loop and recap_now never check one Member at once
+        self.tasks = set()  # keeps recap_now tasks referenced until they finish
 
     async def cog_load(self):
         self.recap_loop.start()
@@ -93,25 +95,46 @@ class Recaps(commands.Cog):
     async def cog_unload(self):
         self.recap_loop.cancel()
 
-    @tasks.loop(minutes=5)
-    async def recap_loop(self):
+    async def context(self):
+        """(recap forum, (heroes, items, ranks)), or None when recaps can't run right now."""
         forum_id = db.get_setting(self.bot.db, "recap_forum_id")
         forum = self.bot.get_channel(int(forum_id)) if forum_id else None
         if not isinstance(forum, discord.ForumChannel):
-            return
+            return None
         try:
-            assets = (await self.bot.api.heroes(), await self.bot.api.items(), await self.bot.api.ranks())
+            return forum, (await self.bot.api.heroes(), await self.bot.api.items(), await self.bot.api.ranks())
         except APIError as e:
             print(f"recaps: asset lists failed: {e}")
-            return
-        for link in db.all_links(self.bot.db):
-            member = forum.guild.get_member(link["member_id"])
-            if member is None:  # left the server; the link cog removes the Link
-                continue
+            return None
+
+    async def check_member(self, forum, member_id, assets):
+        async with self.locks.setdefault(member_id, asyncio.Lock()):
+            # re-read inside the lock: the other path may have just posted and moved last_match_id
+            link = db.get_link(self.bot.db, member_id)
+            member = forum.guild.get_member(member_id)
+            if link is None or member is None:  # unlinked, or left the server (the link cog removes the Link)
+                return
             try:
                 await self.recap_member(forum, member, link, assets)
             except Exception as e:  # an unhandled error would stop the loop for good
-                print(f"recaps: member {member.id} failed: {e}")
+                print(f"recaps: member {member_id} failed: {e}")
+
+    def recap_now(self, member_id):
+        """Check one Member right away, e.g. just after they link, instead of waiting for the loop."""
+        async def run():
+            if ctx := await self.context():
+                await self.check_member(ctx[0], member_id, ctx[1])
+        task = asyncio.create_task(run())
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    @tasks.loop(minutes=5)
+    async def recap_loop(self):
+        if not (ctx := await self.context()):
+            return
+        forum, assets = ctx
+        for link in db.all_links(self.bot.db):
+            await self.check_member(forum, link["member_id"], assets)
 
     @recap_loop.before_loop
     async def before_loop(self):

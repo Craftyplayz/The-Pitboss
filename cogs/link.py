@@ -91,8 +91,10 @@ class ConfirmLink(discord.ui.View):
         if taken and taken["member_id"] != interaction.user.id:
             return await self.finish(interaction, "That Player was just linked to another Member.")
         db.set_link(bot_db, interaction.user.id, self.account_id, int(time.time()))
-        await self.finish(interaction, f"Linked to **{self.name}**.")
+        await self.finish(interaction, f"Linked to **{self.name}**. Your recaps start in a minute or two.")
         await interaction.followup.send(f"Linked {interaction.user.mention} to **{self.name}**.")
+        if recaps := self.cog.bot.get_cog("Recaps"):
+            recaps.recap_now(interaction.user.id)  # don't make a new Member wait for the 5-minute loop
 
     @discord.ui.button(label="Not me", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction, button):

@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import types
 import unittest
@@ -123,6 +124,53 @@ class SiteLinks(unittest.IsolatedAsyncioTestCase):  # discord.ui.View needs a ru
                 "View match": (f"{SITE_URL}/#matches/7/55", 0), "Celeste stats": (f"{SITE_URL}/#heroes/3", 0),
                 "Profile": (f"{SITE_URL}/#players/55", 0), "Leaderboards": (f"{SITE_URL}/#leaderboards", 1),
                 "The Pitboss": (f"{SITE_URL}/", 1)})
+
+
+class CheckMember(unittest.IsolatedAsyncioTestCase):
+    """The loop and recap_now (run on /link) must never check one Member at once, or a recap posts twice."""
+
+    def cog(self):
+        from cogs.recaps import Recaps
+        from core import db
+        bot = MagicMock()
+        bot.db = db.connect(":memory:")
+        db.set_link(bot.db, 1, 111, 0)
+        cog = Recaps(bot)
+        self.seen, self.running = [], 0
+
+        async def fake_recap(forum, member, link, assets):
+            self.running += 1
+            self.assertEqual(self.running, 1, "two checks overlapped")
+            self.seen.append(link["last_match_id"])
+            await asyncio.sleep(0.01)
+            db.update_link(bot.db, 1, last_match_id=(link["last_match_id"] or 0) + 1)  # "posted" a recap
+            self.running -= 1
+        cog.recap_member = fake_recap
+        return cog
+
+    async def test_serialized_and_rereads_link(self):
+        cog = self.cog()
+        forum = MagicMock()
+        await asyncio.gather(cog.check_member(forum, 1, ()), cog.check_member(forum, 1, ()))
+        self.assertEqual(self.seen, [None, 1])  # the second check saw the first one's progress
+
+    async def test_unlinked_member_skipped(self):
+        cog = self.cog()
+        await cog.check_member(MagicMock(), 2, ())
+        self.assertEqual(self.seen, [])
+
+    async def test_recap_now_runs_in_background(self):
+        cog = self.cog()
+        forum = MagicMock()
+
+        async def ctx():
+            return forum, ()
+        cog.context = ctx
+        cog.recap_now(1)
+        self.assertEqual(len(cog.tasks), 1)
+        await asyncio.gather(*cog.tasks)
+        self.assertEqual(self.seen, [None])
+        self.assertEqual(cog.tasks, set())
 
 
 if __name__ == "__main__":
