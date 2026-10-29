@@ -36,7 +36,8 @@ class ItemEmojis:
                     resp.raise_for_status()
                     image = await resp.read()
                 emoji = await self.bot.create_application_emoji(name=name, image=image)
-            except (aiohttp.ClientError, discord.HTTPException) as e:
+            # ValueError: discord.py rejects formats it can't upload (e.g. an SVG icon); the recap still posts without it
+            except (aiohttp.ClientError, discord.HTTPException, ValueError) as e:
                 print(f"emoji {name} failed: {e}")
                 return ""
             ItemEmojis.by_name[name] = str(emoji)
