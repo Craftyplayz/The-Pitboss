@@ -66,12 +66,13 @@ async def build_dashboard(app):
         _safe(api.get("/v1/players/rank", account_ids=joined), []),
         _safe(api.get("/v1/players/hero-stats", account_ids=joined), []),
         _safe(api.get("/v1/analytics/hero-stats", min_unix_timestamp=since), []),
-        *[_safe(api.get(f"/v1/players/{a}/match-history"), []) for a in ids],
-        *[_safe(api.get(f"/v1/players/{a}/mate-stats", min_unix_timestamp=since), []) for a in ids],
-        *[_safe(api.get(f"/v1/players/{a}/enemy-stats", min_unix_timestamp=since), []) for a in ids],
+        *[_safe(match_history(app, a), []) for a in ids],
+        *[_safe(api.get(f"/v1/players/{a}/mate-stats"), []) for a in ids],
+        *[_safe(api.get(f"/v1/players/{a}/enemy-stats"), []) for a in ids],
     )
     steam, rank_rows, hero_stats, hero_rows = results[:4]
-    histories = {a: [m for m in h if m["start_time"] >= since] for a, h in zip(ids, results[4:4 + n])}
+    full = dict(zip(ids, results[4:4 + n]))
+    histories = {a: [m for m in h if m["start_time"] >= since] for a, h in full.items()}
     mates, enemies = dict(zip(ids, results[4 + n:4 + 2 * n])), dict(zip(ids, results[4 + 2 * n:]))
 
     linked = set(ids)
@@ -84,11 +85,11 @@ async def build_dashboard(app):
     profiles = {p["account_id"]: p for p in [*steam, *other_steam]}
     badges = {r["account_id"]: r.get("badge") or 0 for r in rank_rows}
 
-    players = [dash.player_entry(a, profiles.get(a), badges.get(a, 0), histories[a],
+    players = [dash.player_entry(a, profiles.get(a), badges.get(a, 0), full[a], since,
                                  [r for r in hero_stats if r["account_id"] == a], mates[a], enemies[a], linked, profiles)
                for a in ids]
-    players = [p for p in players if p]  # shortcut: Linked Players with no match in 30 days are left off the page
-    heroes, items, full = await api.heroes(), await api.items(), dict(zip(ids, results[4:4 + n]))
+    players = [p for p in players if p]  # a Linked Player with no Match at all has nothing to show
+    heroes, items = await api.heroes(), await api.items()
     shop = dash.shop_items(items)
     for p in players:  # trophies count every match, not just the 30-day window
         p["tr"], p["tp"], p["tw"], p["ti"] = player_trophies(full[p["id"]], db.match_stats(app["db"], p["id"]),
@@ -97,13 +98,19 @@ async def build_dashboard(app):
     return dash.dashboard(now, players, histories, heroes, items, await api.ranks(), hero_rows, names)
 
 
+def match_history(app, account_id):
+    """A Player's full match history, shared by the dashboard build and the match-list pages."""
+    return cached(app, f"history:{account_id}", DASHBOARD_TTL,
+                  lambda: app["api"].get(f"/v1/players/{account_id}/match-history"))
+
+
 async def dashboard_data(app):
     return await cached(app, "dashboard", DASHBOARD_TTL, lambda: build_dashboard(app))
 
 
 async def index(request):
     data = await dashboard_data(request.app)
-    if not data or not data["P"]:
+    if not data or not any(p["n"] for p in data["P"]):  # the overview needs someone in the 30-day window
         return web.Response(text=empty_page("No Linked Players have played in the last 30 days."), content_type="text/html")
     # scrims come from the bot's database, not the API, so they are read fresh on every load
     scrims = [{**json.loads(r["detail"]), "sid": r["id"]} for r in db.scrims_in(request.app["db"], "done")]
@@ -132,6 +139,18 @@ async def match_api(request):
         app["cache"].pop(f"match:{match_id}", None)  # not processed yet; try again next time
         raise web.HTTPNotFound()
     return web.json_response(detail)
+
+
+async def player_matches_api(request):
+    """One page of a Linked Player's match rows, newest first: ?page=0 is the newest 30."""
+    account_id, app = int(request.match_info["account_id"]), request.app
+    page = request.query.get("page", "0")
+    if not page.isdigit():
+        raise web.HTTPBadRequest()
+    # only Linked Players, so the site can't be used as an open proxy to the API
+    if account_id not in {l["account_id"] for l in db.all_links(app["db"])}:
+        raise web.HTTPNotFound()
+    return web.json_response(dash.history_page(await match_history(app, account_id) or [], int(page)))
 
 
 async def hero_items_api(request):
@@ -193,6 +212,7 @@ def make_app():
                     web.get("/admin/body/{digest:[0-9a-f]{64}}", admin.body),
                     web.get("/api/match/{match_id:\\d+}", match_api),
                     web.get("/api/hero-items/{hero_id:\\d+}", hero_items_api),
+                    web.get("/api/players/{account_id:\\d+}/matches", player_matches_api),
                     web.static("/static", ROOT / "static"),
                     web.get("/mockups", mockups_index),
                     web.static("/mockups", ROOT / "mockups")])

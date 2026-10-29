@@ -205,7 +205,7 @@ class Recaps(commands.Cog):
                 await asyncio.sleep(POST_DELAY)
                 latest = await thread.send(**post), post_title(post)
             else:
-                created = await forum.create_thread(name=member.display_name, **post)
+                created = await forum.create_thread(name=member.display_name, auto_archive_duration=10080, **post)
                 thread, latest = created.thread, (created.message, post_title(post))
                 db.update_link(self.bot.db, member.id, thread_id=thread.id)
             # saved per post so a crash mid-batch doesn't double-post
@@ -215,9 +215,9 @@ class Recaps(commands.Cog):
         await self.save_stats(link, history, assets[1])
 
     async def save_stats(self, link, history, items):
-        """Save trophy stats for Matches since the Link (and its Backfill) that recaps didn't already cover."""
+        """Save trophy stats for every Match in the history that recaps didn't already cover, newest first."""
         saved = db.saved_match_ids(self.bot.db, link["account_id"])
-        todo = sorted((m for m in history if match_end(m) > link["linked_at"] - BACKFILL and m["match_id"] not in saved),
+        todo = sorted((m for m in history if m["match_id"] not in saved),
                       key=lambda m: -m["match_id"])
         for m in todo[:STATS_PER_RUN]:
             meta = await self.bot.api.get(f"/v1/matches/{m['match_id']}/metadata")

@@ -1,7 +1,7 @@
 """Trophies: tiers a Player earns (docs/trophies-plan.md). Pure functions.
 
 FAMILIES count the Player's full match history. META_FAMILIES need match metadata, so they count the
-match_stats rows Match Recaps save: Matches since the Link plus its Backfill.
+match_stats rows the recaps cog saves: every Match in the history, filled in a few per loop run.
 """
 from collections import Counter
 from itertools import accumulate
@@ -120,7 +120,7 @@ def _items_owned(rows):
         yield len(seen)
 
 
-# Same shape as FAMILIES, but run over match_stats rows: Matches since the Link (plus its Backfill) only.
+# Same shape as FAMILIES, but run over match_stats rows: only Matches whose metadata has been saved so far.
 # Collector's last threshold (None) is filled with the number of shop items.
 META_FAMILIES = {
     "dmg": ("Combat", "Damage dealt", "", ["Scrapper", "Bruiser", "Heavy Hitter", "Wrecking Ball", "Demolisher", "Annihilator", "Cataclysm"],

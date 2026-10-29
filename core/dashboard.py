@@ -69,11 +69,24 @@ def _people(rows, id_key, linked, profiles, limit=PEOPLE_SHOWN):
     return out
 
 
-def player_entry(account_id, profile, badge, history, hero_stats, mates, enemies, linked, profiles):
-    """One Linked Player's entry, or None if they have no matches in `history` (already windowed)."""
+PAGE = 30  # match rows per page in a profile's match list
+GRAPH = 50  # matches in a profile's souls/min graph
+
+
+def match_row(m):
+    """A match as the page's row: [id, hero, start, kills, deaths, assists, souls, seconds, win, last hits]."""
+    return [m["match_id"], m["hero_id"], m["start_time"], m["player_kills"], m["player_deaths"], m["player_assists"],
+            m["net_worth"], m["match_duration_s"], int(won(m)), m["last_hits"]]
+
+
+def history_page(history, page):
+    """Page `page` (0 = newest) of a Player's match rows, newest first."""
     games = sorted(history, key=lambda m: -m["start_time"])
-    if not games:
-        return None
+    return [match_row(m) for m in games[page * PAGE:(page + 1) * PAGE]]
+
+
+def _totals(games):
+    """Record, K/D/A totals, souls/min and [hero, games, wins, k, d, a] per hero, most played first."""
     by_hero = defaultdict(lambda: [0, 0, 0, 0, 0])
     for m in games:
         h = by_hero[m["hero_id"]]
@@ -84,19 +97,50 @@ def player_entry(account_id, profile, badge, history, hero_stats, mates, enemies
         h[4] += m["player_assists"]
     minutes = sum(m["match_duration_s"] for m in games) / 60
     return {
-        "id": account_id,
-        "name": esc((profile or {}).get("personaname") or str(account_id)),
-        "av": esc((profile or {}).get("avatarmedium")),
-        "cc": esc((profile or {}).get("countrycode")) or None,
-        "tier": badge // 10, "sub": badge % 10,
         "n": len(games), "w": sum(won(m) for m in games),
         "k": sum(m["player_kills"] for m in games), "d": sum(m["player_deaths"] for m in games),
         "a": sum(m["player_assists"] for m in games),
         "spm": round(sum(m["net_worth"] for m in games) / minutes) if minutes else 0,
         "hero": sorted(([h, *v] for h, v in by_hero.items()), key=lambda r: -r[1]),
-        "form": [int(won(m)) for m in reversed(games[:20])],  # oldest -> newest
-        "g": [[m["match_id"], m["hero_id"], m["start_time"], m["player_kills"], m["player_deaths"], m["player_assists"],
-               m["net_worth"], m["match_duration_s"], int(won(m)), m["last_hits"]] for m in games],
+    }
+
+
+def all_time(games):
+    """The profile's numbers over a Player's whole history. games: newest first, at least one."""
+    n, kda = len(games), lambda m: (m["player_kills"] + m["player_assists"]) / max(1, m["player_deaths"])
+    return {
+        **_totals(games),
+        "sk": [int(won(games[0])), next((i for i, m in enumerate(games) if won(m) != won(games[0])), n)],
+        "len": round(sum(m["match_duration_s"] for m in games) / n),
+        "nw": round(sum(m["net_worth"] for m in games) / n),
+        "lh": round(sum(m["last_hits"] for m in games) / n),
+        "best": match_row(max(games, key=kda)),
+        "worst": match_row(max(games, key=lambda m: m["player_deaths"])),
+        "g": [match_row(m) for m in games[:PAGE]],  # page 0; later pages come from /api/players/<id>/matches
+        "sg": [[m["start_time"], round(m["net_worth"] / (m["match_duration_s"] / 60)) if m["match_duration_s"] else 0,
+                int(won(m))] for m in reversed(games[:GRAPH])],  # oldest -> newest
+    }
+
+
+def player_entry(account_id, profile, badge, history, since, hero_stats, mates, enemies, linked, profiles):
+    """One Linked Player's entry, or None if `history` (their full match history) is empty.
+
+    The top-level numbers cover Matches since `since` (the Leaderboard Window); "al" covers every Match.
+    """
+    games = sorted(history, key=lambda m: -m["start_time"])
+    if not games:
+        return None
+    recent = [m for m in games if m["start_time"] >= since]
+    return {
+        "id": account_id,
+        "name": esc((profile or {}).get("personaname") or str(account_id)),
+        "av": esc((profile or {}).get("avatarmedium")),
+        "cc": esc((profile or {}).get("countrycode")) or None,
+        "tier": badge // 10, "sub": badge % 10,
+        **_totals(recent),
+        "form": [int(won(m)) for m in reversed(recent[:20])],  # oldest -> newest
+        "g": [match_row(m) for m in recent],
+        "al": all_time(games),
         "mate": _people(mates, "mate_id", linked, profiles),
         "enem": _people(enemies, "enemy_id", linked, profiles),
         # all-time numbers from /v1/players/hero-stats
@@ -164,7 +208,7 @@ def dashboard(now, players, histories, heroes, items, ranks, hero_rows, names):
         "HA": hero_analytics(hero_rows),
         "TI": {},
         "N": {i: esc(n) for i, n in names.items()},
-        # trophy families: key -> [category, label, unit, tier names, thresholds, lower is better, counts since Link only]
+        # trophy families: key -> [category, label, unit, tier names, thresholds, lower is better, from saved match data]
         "TF": {k: [cat, label, unit, tiers, [(len(shop) if k == "collector" else len(heroes)) if t is None else t for t in th], low,
                    k in META_FAMILIES]
                for k, (cat, label, unit, tiers, th, _, low) in {**FAMILIES, **META_FAMILIES}.items()},

@@ -24,7 +24,7 @@ A Member who has a Link. Every Linked Member gets Match Recaps.
 ### Stats
 
 **Profile**:
-A summary of one Player's stats: rank, win rate and most-played heroes.
+A summary of one Player's stats: rank, win rate and most-played heroes. Discord's /profile covers the last 30 days; the website's covers the Player's whole match history.
 _Avoid_: Player card, stats page
 
 **Match**:
