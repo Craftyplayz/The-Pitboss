@@ -60,7 +60,7 @@ A custom Match between Members, set up with /scrim: Members sign up in its own c
 _Avoid_: Custom game, inhouse, private match
 
 **Recap Thread**:
-The forum post, one per Member, where that Member's Match Recaps are posted. It is created with the first Match Recap and archived when the Link ends.
+The forum post, one per Member, where that Member's Match Recaps are posted. It is created with the first Match Recap and opens with the Member's Discord avatar, which the forum list shows as the post's image. It is archived when the Link ends.
 _Avoid_: Feed, log
 
 **Patch Notes**:

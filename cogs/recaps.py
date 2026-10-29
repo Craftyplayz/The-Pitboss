@@ -1,5 +1,6 @@
 """Match Recaps: post each Linked Member's finished Matches to their Recap Thread."""
 import asyncio
+import io
 import time
 from datetime import datetime, timezone
 
@@ -122,12 +123,40 @@ async def update_header(thread, latest, title):
         print(f"recaps: header update in {thread.id} failed: {e}")
 
 
+async def avatar_file(member):
+    """The Member's Discord avatar as avatar.png, or None if Discord won't serve it."""
+    try:
+        data = await member.display_avatar.with_static_format("png").with_size(256).read()
+    except discord.HTTPException as e:
+        print(f"recaps: avatar for {member.id} failed: {e}")
+        return None
+    return discord.File(io.BytesIO(data), "avatar.png")
+
+
+async def add_avatar(thread, member):
+    """Put the Member's avatar first on the Recap Thread's first message, so the forum list shows it as the
+    post's image instead of a recap graph. For threads made before the avatar starter; the recap stays as it was."""
+    try:
+        first = await thread.fetch_message(thread.id)
+        if any(a.filename == "avatar.png" for a in first.attachments) or not (file := await avatar_file(member)):
+            return
+        archived = thread.archived
+        if archived:  # an archived thread's messages can't be edited
+            await thread.edit(archived=False)
+        await first.edit(attachments=[file, *first.attachments])
+        if archived:
+            await thread.edit(archived=True)
+    except discord.HTTPException as e:
+        print(f"recaps: avatar on {thread.id} failed: {e}")
+
+
 class Recaps(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.emojis = ItemEmojis(bot)
         self.locks = {}  # member_id -> Lock, so the loop and recap_now never check one Member at once
         self.tasks = set()  # keeps recap_now tasks referenced until they finish
+        self.avatar_checked = set()  # Recap Thread ids whose first message had its avatar checked since startup
 
     async def cog_load(self):
         self.recap_loop.start()
@@ -190,7 +219,11 @@ class Recaps(commands.Cog):
         if skip_to is not None:
             db.update_link(self.bot.db, member.id, last_match_id=skip_to)
         recap = recap[:RECAPS_PER_RUN]
-        thread = await self.usable_thread(forum, link["thread_id"]) if recap else None
+        unchecked = link["thread_id"] is not None and link["thread_id"] not in self.avatar_checked
+        thread = await self.usable_thread(forum, link["thread_id"]) if recap or unchecked else None
+        if thread and thread.id not in self.avatar_checked:
+            self.avatar_checked.add(thread.id)
+            await add_avatar(thread, member)
         latest = None  # (message, title) of the newest recap posted this run
         for match in recap:
             # insights compare against earlier Matches only, so backfilled recaps don't see the future
@@ -201,13 +234,18 @@ class Recaps(commands.Cog):
                     break  # metadata not ready yet; retry next run so the recap gets the full layout
                 post = {"embed": build_embed(match, earlier, heroes, member)}
             add_site_links(post, match, link["account_id"], hero_names.get(match["hero_id"], "Hero"))
-            if thread:
-                await asyncio.sleep(POST_DELAY)
-                latest = await thread.send(**post), post_title(post)
-            else:
-                created = await forum.create_thread(name=member.display_name, auto_archive_duration=10080, **post)
-                thread, latest = created.thread, (created.message, post_title(post))
+            if not thread:
+                # the first message is the Member's avatar, so the forum list shows them, not a recap graph
+                avatar = await avatar_file(member)
+                created = await forum.create_thread(
+                    name=member.display_name, auto_archive_duration=10080,
+                    content=f"Match Recaps for **{discord.utils.escape_markdown(member.display_name)}**",
+                    **({"file": avatar} if avatar else {}))
+                thread = created.thread
+                self.avatar_checked.add(thread.id)
                 db.update_link(self.bot.db, member.id, thread_id=thread.id)
+            await asyncio.sleep(POST_DELAY)
+            latest = await thread.send(**post), post_title(post)
             # saved per post so a crash mid-batch doesn't double-post
             db.update_link(self.bot.db, member.id, last_match_id=match["match_id"])
         if latest:

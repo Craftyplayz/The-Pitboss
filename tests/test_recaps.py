@@ -219,5 +219,78 @@ class LatestHeader(unittest.IsolatedAsyncioTestCase):
         await update_header(thread, MagicMock(id=2, jump_url="u"), "x")  # must not raise
 
 
+class Avatar(unittest.IsolatedAsyncioTestCase):
+    def setup_thread(self, filenames, archived=False):
+        from unittest.mock import AsyncMock
+        first = AsyncMock()
+        first.attachments = [MagicMock(filename=f) for f in filenames]
+        thread = MagicMock(id=1, archived=archived)
+        thread.fetch_message = AsyncMock(return_value=first)
+        thread.edit = AsyncMock()
+        member = MagicMock(id=5)
+        member.display_avatar.with_static_format.return_value.with_size.return_value.read = AsyncMock(return_value=b"png")
+        return thread, first, member
+
+    async def test_avatar_goes_first_and_recap_images_stay(self):
+        from cogs.recaps import add_avatar
+        thread, first, member = self.setup_thread(["souls.png", "scoreboard.png"])
+        await add_avatar(thread, member)
+        files = first.edit.await_args.kwargs["attachments"]
+        self.assertEqual(files[0].filename, "avatar.png")
+        self.assertEqual(files[1:], first.attachments)
+        thread.edit.assert_not_awaited()
+
+    async def test_already_has_avatar(self):
+        from cogs.recaps import add_avatar
+        thread, first, member = self.setup_thread(["avatar.png"])
+        await add_avatar(thread, member)
+        first.edit.assert_not_awaited()
+
+    async def test_archived_thread_is_reopened_then_archived_again(self):
+        from cogs.recaps import add_avatar
+        thread, first, member = self.setup_thread(["souls.png"], archived=True)
+        await add_avatar(thread, member)
+        self.assertEqual([c.kwargs for c in thread.edit.await_args_list], [{"archived": False}, {"archived": True}])
+        first.edit.assert_awaited_once()
+
+    async def test_new_thread_opens_with_avatar_then_recap(self):
+        import time
+        from unittest.mock import AsyncMock, patch
+        from cogs import recaps
+        from core import db
+        bot = MagicMock()
+        bot.db = db.connect(":memory:")
+        db.set_link(bot.db, 5, 111, int(time.time()) - 3600)
+        match = {"match_id": 7, "start_time": int(time.time()) - 2400, "match_duration_s": 1800, "hero_id": 1}
+        bot.api.get = AsyncMock(return_value=[match])
+        cog = recaps.Recaps(bot)
+        cog.full_post = AsyncMock(return_value={"embed": discord.Embed(title="Haze · Win · 30:00")})
+        cog.save_stats = AsyncMock()
+        _, _, member = self.setup_thread([])
+        member.display_name = "Hu_ski"
+        thread = MagicMock(id=42)
+        thread.send = AsyncMock(return_value=MagicMock(id=43))
+        forum = MagicMock()
+        forum.create_thread = AsyncMock(return_value=MagicMock(thread=thread))
+        with patch.object(recaps, "POST_DELAY", 0), patch.object(recaps, "update_header", AsyncMock()) as header:
+            await cog.recap_member(forum, member, db.get_link(bot.db, 5), ({}, {}, {}))
+        kw = forum.create_thread.await_args.kwargs
+        self.assertEqual(kw["file"].filename, "avatar.png")
+        self.assertEqual(kw["content"], r"Match Recaps for **Hu\_ski**")
+        self.assertNotIn("embed", kw)  # the recap is a reply, not the first message
+        self.assertEqual(thread.send.await_args.kwargs["embed"].title, "Haze · Win · 30:00")
+        self.assertEqual(db.get_link(bot.db, 5)["thread_id"], 42)
+        self.assertEqual(header.await_args.args[0], thread)
+
+    async def test_avatar_download_failure_changes_nothing(self):
+        from unittest.mock import AsyncMock
+        from cogs.recaps import add_avatar
+        thread, first, member = self.setup_thread(["souls.png"])
+        member.display_avatar.with_static_format.return_value.with_size.return_value.read = AsyncMock(
+            side_effect=discord.NotFound(MagicMock(status=404), "gone"))
+        await add_avatar(thread, member)
+        first.edit.assert_not_awaited()
+
+
 if __name__ == "__main__":
     unittest.main()
