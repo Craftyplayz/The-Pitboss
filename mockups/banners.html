@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pitboss Banners</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Cinzel:wght@700;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0f15;--card:#141a23;--line:#232c39;--tx:#dbdee1;--mu:#8792a2;--gold:#F0C35A}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px Inter,system-ui,sans-serif;padding:24px 16px}
+h1{font:700 24px Cinzel,serif;color:var(--gold);margin:0 0 4px}p.lead{color:var(--mu);margin:0 0 24px}
+.grid{display:grid;gap:16px;max-width:760px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+.card h2{margin:0 0 2px;font:600 16px Inter}.card .d{color:var(--mu);font-size:13px;margin-bottom:14px}
+.card svg{width:100%;max-width:680px;height:auto;display:block;border-radius:8px}
+</style></head><body>
+<h1>The Pitboss — banner concepts</h1>
+<p class="lead">Discord banner, 680 × 240 (17:6), built from icon 4, "The watcher". Pick a number and it gets exported as a PNG.</p>
+<div class="grid" id="grid"></div>
+<script>
+const G='#F0C35A',G2='#b8892f',BG='#10151d',T='#5fd4c8';
+// icon 4 geometry (64x64 box), placed at x,y with scale s
+const eye=(x,y,s,ring=true)=>`<g transform="translate(${x} ${y}) scale(${s})">${ring?`<path d="M32 6L58 32L32 58L6 32Z" fill="none" stroke="${G}" stroke-width="3"/>`:''}<path d="M14 32C20 23 26 20 32 20C38 20 44 23 50 32C44 41 38 44 32 44C26 44 20 41 14 32Z" fill="${G}"/><circle cx="32" cy="32" r="8" fill="${BG}"/><circle cx="32" cy="32" r="5" fill="${T}"/><circle cx="34" cy="30" r="1.6" fill="#fff"/></g>`;
+const svg=(inner,defs='')=>`<svg viewBox="0 0 680 240" width="680" height="240" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs><rect width="680" height="240" fill="${BG}"/>${inner}</svg>`;
+const title=(x,y,anchor='start',size=46)=>`<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Cinzel,serif" font-weight="900" font-size="${size}" fill="${G}" letter-spacing="2">THE PITBOSS</text>`;
+const sub=(x,y,txt,anchor='start')=>`<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Inter,sans-serif" font-weight="600" font-size="15" fill="${T}" letter-spacing="4">${txt}</text>`;
+const diamonds=(cy,n,step,x0)=>Array.from({length:n},(_,i)=>`<path d="M${x0+i*step} ${cy-5}L${x0+i*step+5} ${cy}L${x0+i*step} ${cy+5}L${x0+i*step-5} ${cy}Z" fill="${G2}"/>`).join('');
+const glow=`<radialGradient id="gl" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="${T}" stop-opacity=".28"/><stop offset="1" stop-color="${T}" stop-opacity="0"/></radialGradient>`;
+const BANNERS=[
+ ['Eye left, name right','The watcher at full size on the left, wordmark and tagline beside it. Closest to the icon.',
+  svg(`<circle cx="130" cy="120" r="120" fill="url(#gl)"/>${eye(50,40,2.5)}${title(250,128)}<rect x="252" y="142" width="380" height="2" fill="${G2}"/>${sub(252,172,'EVERY MATCH. EVERY SOUL.')}`,glow)],
+ ['Centred sigil','Eye in the middle with the name split either side, art-deco rules running to the edges.',
+  svg(`<circle cx="340" cy="120" r="110" fill="url(#gl)"/>${[[0,165],[250,280],[400,430],[625,680]].map(([a,b])=>`<rect x="${a}" y="119" width="${b-a}" height="2" fill="${G2}"/>`).join('')}${eye(270,50,2.2)}<text x="245" y="136" text-anchor="end" font-family="Cinzel,serif" font-weight="900" font-size="36" fill="${G}" letter-spacing="2">THE</text><text x="435" y="136" font-family="Cinzel,serif" font-weight="900" font-size="36" fill="${G}" letter-spacing="2">PITBOSS</text>${sub(340,215,'THE HOUSE SEES ALL','middle')}`,glow)],
+ ['Giant eye crop','A huge eye bleeding off the right edge, name small and sharp on the left. Moody.',
+  svg(`<circle cx="560" cy="120" r="200" fill="url(#gl)"/><g opacity=".9">${eye(380,-80,6.2)}</g><rect width="360" height="240" fill="${BG}" opacity=".0"/>${title(40,118,'start',42)}${sub(42,150,'DEADLOCK STATS BOT')}${diamonds(186,6,22,48)}`,glow)],
+ ['Diamond pattern','Repeating watcher diamonds as a wallpaper, one lit eye in the centre over a dark band.',
+  svg(`<g opacity=".18">${Array.from({length:13},(_,c)=>Array.from({length:5},(_,r)=>`<path d="M${c*60-10+(r%2)*30} ${r*60-30}l24 24-24 24-24-24Z" fill="none" stroke="${G}" stroke-width="1.5"/>`).join('')).join('')}</g><rect x="0" y="70" width="680" height="100" fill="${BG}" opacity=".92"/><rect x="0" y="70" width="680" height="2" fill="${G2}"/><rect x="0" y="168" width="680" height="2" fill="${G2}"/>${eye(60,72,1.5)}${title(170,136,'start',44)}${sub(520,128,'SEES ALL','start')}`)],
+ ['Minimal frame','Thin double gold frame, no glow, eye above a centred wordmark. Clean and formal.',
+  svg(`<rect x="10" y="10" width="660" height="220" fill="none" stroke="${G}" stroke-width="2"/><rect x="18" y="18" width="644" height="204" fill="none" stroke="${G2}" stroke-width="1"/>${[[10,10],[670,10],[10,230],[670,230]].map(([x,y])=>`<path d="M${x} ${y-8}L${x+8} ${y}L${x} ${y+8}L${x-8} ${y}Z" fill="${G}"/>`).join('')}${eye(300,26,1.25,false)}${title(340,150,'middle',50)}${sub(340,190,'EVERY MATCH. EVERY SOUL.','middle')}`)],
+];
+document.getElementById('grid').innerHTML=BANNERS.map(([n,d,s],i)=>`<div class="card"><h2>${i+1}. ${n}</h2><div class="d">${d}</div>${s}</div>`).join('');
+</script>
+</body></html>
