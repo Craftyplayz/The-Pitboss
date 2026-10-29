@@ -137,6 +137,30 @@ def result_embed(scrim_id, detail, hero_names, linked, hero_emojis=None):
     return embed
 
 
+def thread_name(scrim_id, detail):
+    return f"Scrim #{scrim_id} · {TEAMS[detail['win']]} wins"
+
+
+async def open_discussion(message, name):
+    """Start the discussion thread on a logged result. Failing here must not stop the scrim from finishing."""
+    try:
+        return await message.create_thread(name=name[:100], auto_archive_duration=10080)  # archives after a quiet week
+    except discord.HTTPException as e:
+        print(f"scrims: discussion thread failed: {e}")
+        return None
+
+
+async def lock_log_channel(channel, everyone, me):
+    """Members can only talk inside the result threads; the bot can still post results and open threads.
+    Raises discord.Forbidden if the bot can't edit the channel's permissions."""
+    ow = channel.overwrites_for(everyone)
+    ow.update(send_messages=False, send_messages_in_threads=True, create_public_threads=False, create_private_threads=False)
+    await channel.set_permissions(everyone, overwrite=ow, reason="Scrim log: read-only except result threads")
+    mine = channel.overwrites_for(me)
+    mine.update(send_messages=True, create_public_threads=True, send_messages_in_threads=True, embed_links=True, attach_files=True)
+    await channel.set_permissions(me, overwrite=mine, reason="Scrim log: let the bot post results and open threads")
+
+
 class Scrims(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -153,7 +177,16 @@ class Scrims(commands.Cog):
     @app_commands.guild_only()
     async def scrimlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
         db.set_setting(self.bot.db, "scrim_log_id", channel.id)
-        await interaction.response.send_message(f"Finished scrims will be logged in {channel.mention}.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        msg = f"Finished scrims will be logged in {channel.mention}, each with a discussion thread."
+        try:
+            await lock_log_channel(channel, interaction.guild.default_role, interaction.guild.me)
+            msg += " The channel is now read-only except inside the threads."
+        except discord.Forbidden:
+            msg += ("\nI couldn't change its permissions (I need Manage Roles there). To make it read-only by hand, "
+                    "edit the channel's @everyone permissions: Send Messages off, Send Messages in Threads on, "
+                    "Create Public Threads off. Then give me Send Messages and Create Public Threads.")
+        await interaction.followup.send(msg, ephemeral=True)
 
     @app_commands.command(name="scrim", description="Start a scrim: opens a sign-up channel with a Join button.")
     @app_commands.guild_only()
@@ -351,10 +384,12 @@ class Scrims(commands.Cog):
         hero_emojis = {i: await self.emojis.hero(h) for i, h in heroes.items() if i in shown}
         hero_names = {i: h["name"] for i, h in heroes.items()}
         embed = result_embed(sid, detail, hero_names, linked, hero_emojis)
-        log_id = db.get_setting(self.bot.db, "scrim_log_id")
-        for channel_id in {scrim["channel_id"], int(log_id) if log_id else None} - {None}:
+        log_id = int(db.get_setting(self.bot.db, "scrim_log_id") or 0)
+        for channel_id in {scrim["channel_id"], log_id} - {None, 0}:
             if channel := self.bot.get_channel(channel_id):
-                await channel.send(embed=embed, file=discord.File(scoreboard_png(detail, hero_names), "scoreboard.png"))
+                message = await channel.send(embed=embed, file=discord.File(scoreboard_png(detail, hero_names), "scoreboard.png"))
+                if channel_id == log_id:  # the sign-up channel is temporary, so only the log gets a thread
+                    await open_discussion(message, thread_name(sid, detail))
 
 async def setup(bot):
     await bot.add_cog(Scrims(bot))

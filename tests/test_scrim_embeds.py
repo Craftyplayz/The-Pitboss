@@ -43,5 +43,42 @@ class ScrimEmbeds(unittest.IsolatedAsyncioTestCase):  # discord.ui.View needs a 
         self.assertGreater(len(scoreboard_png(match_detail(META, ITEMS, {}), {}).read()), 100)
 
 
+class LogThreads(unittest.IsolatedAsyncioTestCase):
+    async def test_thread_name(self):
+        from cogs.scrims import thread_name
+        self.assertEqual(thread_name(7, {"win": 1}), "Scrim #7 · Sapphire wins")
+
+    async def test_open_discussion(self):
+        from unittest.mock import AsyncMock
+        from cogs.scrims import open_discussion
+        msg = AsyncMock()
+        await open_discussion(msg, "x" * 150)
+        msg.create_thread.assert_awaited_once_with(name="x" * 100, auto_archive_duration=10080)
+
+    async def test_open_discussion_failure_is_swallowed(self):
+        from unittest.mock import AsyncMock, MagicMock
+        import discord
+        from cogs.scrims import open_discussion
+        msg = AsyncMock()
+        msg.create_thread.side_effect = discord.Forbidden(MagicMock(status=403), "no")
+        self.assertIsNone(await open_discussion(msg, "Scrim #1"))
+
+    async def test_lock_log_channel(self):
+        from unittest.mock import AsyncMock, MagicMock
+        import discord
+        from cogs.scrims import lock_log_channel
+        channel = MagicMock()
+        channel.overwrites_for.side_effect = lambda target: discord.PermissionOverwrite(view_channel=True)
+        channel.set_permissions = AsyncMock()
+        everyone, me = object(), object()
+        await lock_log_channel(channel, everyone, me)
+        (t1, k1), (t2, k2) = [(c.args[0], c.kwargs["overwrite"]) for c in channel.set_permissions.await_args_list]
+        self.assertIs(t1, everyone)
+        self.assertEqual((k1.send_messages, k1.send_messages_in_threads, k1.create_public_threads), (False, True, False))
+        self.assertTrue(k1.view_channel)  # existing overwrites are kept
+        self.assertIs(t2, me)
+        self.assertEqual((k2.send_messages, k2.create_public_threads), (True, True))
+
+
 if __name__ == "__main__":
     unittest.main()
