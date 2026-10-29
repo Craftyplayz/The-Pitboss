@@ -42,8 +42,13 @@ Ravenye buys almost only Spirit items (12.4 Spirit, 2.4 Vitality, 0.3 Weapon per
 
 ## Display
 
-- **`/profile`**: a small "Trophies — 37 / 140" section showing the 3 newest and 3 rarest trophies. An **All trophies** button opens the full list.
-- **`/trophies [member]`**: the full list, grouped by category, with tier, date earned and rarity. Trophies you don't have yet show as locked, with progress (e.g. "Reaper — 1,204 / 1,250 kills").
+- **`/profile`**: a small "Trophies — 37 / 140" section showing the 3 newest and 3 rarest trophies. An **All trophies** link button opens the Player's trophy page on the web dashboard.
+- **Web dashboard trophy page**: the full list, grouped by category, with tier, date earned and rarity. Trophies you don't have yet show as locked, with progress (e.g. "Reaper — 1,204 / 1,250 kills").
+- **`/trophies [member]`**: replies with the same link button.
+- **Match Recap**: lists every trophy earned in that match ("🏆 Reaper unlocked"). For the top 2 tiers of a family, it also pings the Member:
+  - 7-tier families: Master and Eternal
+  - 5-tier families: Platinum and Diamond
+  - Smaller families: their top 2 (e.g. Daily Grind 14 and 30 days; One-Trick Main and One-Trick)
 
 ---
 
@@ -110,7 +115,7 @@ Streaks aren't totals, so they keep their own 5 tiers:
 
 ### Items (since Link only)
 
-The shop has 3 item types: **Weapon**, **Vitality** and **Spirit**. Melee items are part of Weapon. Counts are purchases of that type, including items later sold.
+The shop has 3 item types: **Weapon**, **Vitality** and **Spirit**. Melee items are spread across all three (e.g. Melee Charge is Weapon, Melee Lifesteal is Vitality, Spirit Strike is Spirit). Counts are purchases of that type, including items later sold.
 
 | Family | 1 Bronze — 15 | 2 Silver — 50 | 3 Gold — 250 | 4 Platinum — 500 | 5 Diamond — 1,250 | 6 Master — 2,500 | 7 Eternal — 5,000 |
 |---|---|---|---|---|---|---|---|
@@ -170,6 +175,5 @@ Ravenye won 4 of 41 wins in under 25 min, 2 under 20 min, and one in 11 min. Acc
 
 ## Open questions
 
-1. Should the "All trophies" button open a list inside Discord, or the web dashboard?
-2. Should a Match Recap announce a new trophy ("🏆 Reaper unlocked")?
-3. Melee: keep it inside Weapon, or hand-pick a Melee item list?
+1. Melee items: skip a melee item trophy (Melee kills already covers melee players), or add a "Melee items bought" family from a hand-picked item list that needs updating when patches add melee items?
+2. Daily Grind: which timezone counts as "a day"?
