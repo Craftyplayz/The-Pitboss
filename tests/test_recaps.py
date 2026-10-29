@@ -8,7 +8,10 @@ try:
 except ImportError:  # written by another agent; stub so this module imports
     sys.modules["core.insights"] = types.SimpleNamespace(match_insights=lambda m, h, n: ["insight"])
 
-from cogs.recaps import MAX_AGE, build_embed, due_matches
+import discord
+
+from cogs.recaps import MAX_AGE, add_site_links, build_embed, due_matches
+from core.shared import SITE_URL
 
 NOW = 1_800_000_000
 LINKED = NOW - 3 * 86400
@@ -105,6 +108,21 @@ class Embed(unittest.TestCase):
         e = build_embed(match, [match], {}, member)
         self.assertEqual(e.title, "Hero 99 - Loss")
         self.assertNotIn("Rank change", [f.name for f in e.fields])
+
+
+class SiteLinks(unittest.IsolatedAsyncioTestCase):  # discord.ui.View needs a running event loop
+    async def test_author_and_buttons_link_to_the_site(self):
+        for post in ({"embed": discord.Embed()}, {"embeds": [discord.Embed(), discord.Embed()]}):
+            embed = post.get("embed") or post["embeds"][0]
+            embed.set_author(name="craft", icon_url="https://x/a.png")
+            add_site_links(post, {"match_id": 7, "hero_id": 3}, 55, "Celeste")
+            self.assertEqual(embed.author.url, f"{SITE_URL}/#players/55")
+            self.assertEqual(embed.author.icon_url, "https://x/a.png")
+            buttons = {b.label: (b.url, b.row) for b in post["view"].children}
+            self.assertEqual(buttons, {
+                "View match": (f"{SITE_URL}/#matches/7/55", 0), "Celeste stats": (f"{SITE_URL}/#heroes/3", 0),
+                "Profile": (f"{SITE_URL}/#players/55", 0), "Leaderboards": (f"{SITE_URL}/#leaderboards", 1),
+                "The Pitboss": (f"{SITE_URL}/", 1)})
 
 
 if __name__ == "__main__":

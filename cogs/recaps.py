@@ -13,7 +13,7 @@ from cogs._item_emojis import ItemEmojis
 from cogs._recap_embed import build_full_embed
 from core.match import final_build, find_player, scoreboard, souls_sources, souls_timeline
 from core.recap_images import scoreboard_image, souls_image
-from core.shared import won
+from core.shared import site_links, won
 
 MAX_AGE = 24 * 3600  # a Match after the Link missed for longer than this gets no recap
 BACKFILL = 30 * 86400  # on link, Matches from this long before it get recaps too
@@ -66,6 +66,20 @@ def build_embed(match, history, hero_names, member):
         embed.add_field(name="Rank change", value=f"{match['ranked_delta']:+d}")
     embed.set_footer(text=f"Match {match['match_id']}")
     return embed
+
+
+def add_site_links(post, match, account_id, hero_name):
+    """Point the recap at the website: the author name opens the profile, link buttons open the rest.
+    Links in embed text would show blue; author names and buttons stay white."""
+    links = site_links(account_id, match["match_id"], match["hero_id"])
+    embed = post["embeds"][0] if "embeds" in post else post["embed"]
+    embed.set_author(name=embed.author.name, icon_url=embed.author.icon_url, url=links["player"])
+    view = discord.ui.View(timeout=None)
+    for label, key, row in (("View match", "match", 0), (f"{hero_name} stats", "hero", 0), ("Profile", "player", 0),
+                            ("Leaderboards", "leaderboards", 1), ("The Pitboss", "home", 1)):
+        view.add_item(discord.ui.Button(label=label, url=links[key], row=row))
+    post["view"] = view
+    return post
 
 
 class Recaps(commands.Cog):
@@ -122,6 +136,7 @@ class Recaps(commands.Cog):
                 if time.time() - match_end(match) < META_WAIT:
                     break  # metadata not ready yet; retry next run so the recap gets the full layout
                 post = {"embed": build_embed(match, earlier, hero_names, member)}
+            add_site_links(post, match, link["account_id"], hero_names.get(match["hero_id"], "Hero"))
             if thread:
                 await asyncio.sleep(POST_DELAY)
                 await thread.send(**post)

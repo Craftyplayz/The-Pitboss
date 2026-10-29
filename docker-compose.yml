@@ -6,6 +6,8 @@ services:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
       GUILD_ID: ${GUILD_ID}
       DEADLOCK_API_KEY: ${DEADLOCK_API_KEY:-}
+      # recaps link here
+      SITE_URL: ${SITE_URL:-https://deadlock.craftyplayz.com}
     restart: unless-stopped
     volumes:
       - pitboss-data:/app/data
