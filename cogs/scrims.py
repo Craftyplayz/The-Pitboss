@@ -36,6 +36,20 @@ def button(label, action, scrim_id, style=discord.ButtonStyle.secondary, disable
     return discord.ui.Button(label=label, custom_id=f"scrim:{action}:{scrim_id}", style=style, disabled=disabled)
 
 
+def link_guide():
+    """Private reply for a Member who presses Join without a Linked Deadlock account."""
+    embed = discord.Embed(title="Link your Deadlock account to join", color=discord.Color.gold(),
+                          description="Scrims need a linked account so the bot can make the lobby and save "
+                                      "everyone's scoreboard. It takes about a minute:")
+    embed.add_field(name="1. Run /link", value="Type `/link` in any channel.", inline=False)
+    embed.add_field(name="2. Find yourself", value="Start typing your Steam name in the `player` box and pick yourself "
+                                                    "from the list. Can't find it? Paste your steamcommunity.com "
+                                                    "profile link or your Steam ID instead.", inline=False)
+    embed.add_field(name="3. Confirm", value="Check the card shows your Steam profile, then press **That's me**.", inline=False)
+    embed.add_field(name="4. Join", value="Come back here and press **Join** again.", inline=False)
+    return embed.set_footer(text="Run /help for more on linking.")
+
+
 def mentions(ids):
     return "\n".join(f"<@{m}>" for m in ids) or "–"
 
@@ -175,6 +189,8 @@ class Scrims(commands.Cog):
     @app_commands.command(name="scrim", description="Start a scrim: opens a sign-up channel with a Join button.")
     @app_commands.guild_only()
     async def scrim(self, interaction: discord.Interaction):
+        if await self.needs_link(interaction):  # the creator joins their own scrim
+            return
         await interaction.response.defer()
         now = int(time.time())
         sid = db.create_scrim(self.bot.db, interaction.user.id, now)
@@ -230,10 +246,20 @@ class Scrims(commands.Cog):
             return await interaction.response.send_message("Only the scrim's creator can do that.", ephemeral=True)
         await handler(interaction, scrim)
 
+    async def needs_link(self, interaction):
+        """True (after sending the private how-to-link guide) if the Member has no Linked account.
+        Every path that adds a scrim player checks this: Join, a team button, and /scrim itself."""
+        if db.get_link(self.bot.db, interaction.user.id):
+            return False
+        await interaction.response.send_message(embed=link_guide(), ephemeral=True)
+        return True
+
     async def reject(self, interaction, text):
         await interaction.response.send_message(text, ephemeral=True)
 
     async def do_join(self, interaction, scrim):
+        if await self.needs_link(interaction):
+            return
         players = db.scrim_players(self.bot.db, scrim["id"])
         if scrim["state"] != "open":
             return await self.reject(interaction, "Sign-up for this scrim is closed.")
@@ -274,6 +300,8 @@ class Scrims(commands.Cog):
         await self.say(scrim["id"], "Pick your team with the buttons above.")
 
     async def do_team0(self, interaction, scrim, team=0):
+        if await self.needs_link(interaction):
+            return
         if scrim["state"] != "picking":
             return await self.reject(interaction, "Teams are locked in for this scrim.")
         players = db.scrim_players(self.bot.db, scrim["id"])

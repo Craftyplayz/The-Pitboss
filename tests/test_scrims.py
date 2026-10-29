@@ -1,7 +1,10 @@
 import random
 import unittest
 
-from cogs.scrims import TEAM_SIZE, random_teams, result_embed, signup
+from unittest.mock import AsyncMock, MagicMock
+
+from cogs.scrims import Scrims as ScrimsCog
+from cogs.scrims import TEAM_SIZE, link_guide, random_teams, result_embed, signup
 from core import db
 from core.dashboard import match_detail
 from tests.test_recap_embed import ITEMS, META
@@ -53,6 +56,41 @@ class Scrims(unittest.IsolatedAsyncioTestCase):  # discord.ui.View needs a runni
         players = [(m, None) for m in range(2 * TEAM_SIZE)]
         _, view = signup(row(self.conn, self.sid), players)
         self.assertTrue(view.children[0].disabled)
+
+    def interaction(self, user_id):
+        it = MagicMock()
+        it.user.id = user_id
+        it.response.send_message = AsyncMock()
+        it.response.defer = AsyncMock()
+        return it
+
+    async def test_unlinked_members_get_the_link_guide_and_are_not_added(self):
+        cog = ScrimsCog.__new__(ScrimsCog)  # skip __init__: no loops or emoji uploads in a unit test
+        cog.bot = MagicMock(db=self.conn)
+        cog.refresh = AsyncMock()
+        db.set_link(self.conn, 7, 12345, 0)
+        db.update_scrim(self.conn, self.sid, state="picking")
+        for handler in (cog.do_join, cog.do_team0):
+            db.update_scrim(self.conn, self.sid, state="open" if handler == cog.do_join else "picking")
+            it = self.interaction(8)  # not linked
+            await handler(it, row(self.conn, self.sid))
+            kw = it.response.send_message.call_args.kwargs
+            self.assertTrue(kw["ephemeral"])
+            self.assertEqual(kw["embed"].title, link_guide().title)
+            self.assertNotIn(8, [m for m, _ in db.scrim_players(self.conn, self.sid)])
+        it = self.interaction(8)
+        await ScrimsCog.scrim.callback(cog, it)  # /scrim by an unlinked member makes no scrim
+        it.response.defer.assert_not_called()
+        self.assertEqual(len(db.scrims_in(self.conn, "open")) + len(db.scrims_in(self.conn, "picking")), 1)
+        db.update_scrim(self.conn, self.sid, state="open")
+        it = self.interaction(7)  # linked
+        await cog.do_join(it, row(self.conn, self.sid))
+        self.assertIn(7, [m for m, _ in db.scrim_players(self.conn, self.sid)])
+
+    def test_link_guide_explains_the_steps(self):
+        text = " ".join(f.name + f.value for f in link_guide().fields)
+        for step in ("/link", "That's me", "Join"):
+            self.assertIn(step, text)
 
     def test_result_embed(self):
         detail = match_detail(META, ITEMS, {1: "<b>*x*</b>"})
