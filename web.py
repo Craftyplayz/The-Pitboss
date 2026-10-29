@@ -71,8 +71,12 @@ async def build_dashboard(app):
     mates, enemies = dict(zip(ids, results[4 + n:4 + 2 * n])), dict(zip(ids, results[4 + 2 * n:]))
 
     linked = set(ids)
-    others = {r.get("mate_id") or r.get("enemy_id") for rows in (*mates.values(), *enemies.values()) for r in rows} - linked
-    other_steam = await _safe(api.get("/v1/players/steam", account_ids=",".join(map(str, list(others)[:200]))), []) if others else []
+    # only the mates / rivals the page shows need names; the full lists can run to thousands
+    others = sorted({r["mate_id"] for rows in mates.values() for r in dash.top_people(rows, "mate_id", linked)}
+                    | {r["enemy_id"] for rows in enemies.values() for r in dash.top_people(rows, "enemy_id", linked)})
+    chunks = [others[i:i + 1000] for i in range(0, len(others), 1000)]  # the API's account_ids limit
+    other_steam = [p for found in await asyncio.gather(
+        *[_safe(api.get("/v1/players/steam", account_ids=",".join(map(str, c))), []) for c in chunks]) for p in found]
     profiles = {p["account_id"]: p for p in [*steam, *other_steam]}
     badges = {r["account_id"]: r.get("badge") or 0 for r in rank_rows}
 

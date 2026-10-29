@@ -27,9 +27,17 @@ def _acc(value):
     return round(value * 100) if value <= 1 else round(value)
 
 
-def _people(rows, id_key, linked, profiles, limit=6):
+PEOPLE_SHOWN = 6  # mates / rivals listed per Player
+
+
+def top_people(rows, id_key, linked, limit=PEOPLE_SHOWN):
+    """The mates or enemies the page shows: most games first, Linked Players left out."""
+    return sorted((r for r in rows if r[id_key] not in linked), key=lambda r: -r["matches_played"])[:limit]
+
+
+def _people(rows, id_key, linked, profiles, limit=PEOPLE_SHOWN):
     """Top mates or enemies by games, excluding Linked Players: [id, name, avatar, games, wins]."""
-    rows = sorted((r for r in rows if r[id_key] not in linked), key=lambda r: -r["matches_played"])[:limit]
+    rows = top_people(rows, id_key, linked, limit)
     out = []
     for r in rows:
         prof = profiles.get(r[id_key]) or {}
