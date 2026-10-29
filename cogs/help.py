@@ -12,7 +12,8 @@ PAGES = [
          "game-wide hero and item stats, and an automatic Match Recap after every game you play."),
         ("/link player:",
          "Link your Deadlock account. Start typing your Steam name and pick yourself from the list, "
-         "or paste your Steam ID or steamcommunity.com profile URL. Linking again replaces your old account."),
+         "or paste your Steam ID or steamcommunity.com profile URL. You'll see a card with the account's "
+         "profile picture: press That's me to link it. Linking again replaces your old account."),
         ("/unlink", "Remove your Link. Your recaps stop and your recap post is archived."),
     ]),
     ("Match Recaps", [

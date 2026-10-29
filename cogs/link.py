@@ -28,15 +28,76 @@ def parse_player(text):
     return n if 0 < n < 2**32 else None
 
 
-async def resolve_vanity(name):
-    """Custom URL name -> 32-bit account ID via Steam's public profile XML, else None."""
+async def resolve_vanity(name, api):
+    """Custom URL name -> 32-bit account ID via Steam's public profile XML, else None. Logged through `api`."""
+    url, params = f"https://steamcommunity.com/id/{name}/", {"xml": 1}
+    started, status, size = time.monotonic(), "error", 0
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
-            async with s.get(f"https://steamcommunity.com/id/{name}/", params={"xml": 1}) as resp:
-                m = STEAMID64_RE.search(await resp.text())
+            async with s.get(url, params=params) as resp:
+                status, text = resp.status, await resp.text()
+                size = len(text)
+                m = STEAMID64_RE.search(text)
     except (aiohttp.ClientError, TimeoutError) as e:
         raise APIError("Couldn't reach Steam to look up that custom URL.") from e
+    finally:
+        api.log(url, params, status, started, size)
     return parse_player(m.group(1)) if m else None
+
+
+def flag(country):
+    """Two-letter country code -> flag emoji, else ""."""
+    if not country or len(country) != 2 or not country.isalpha():
+        return ""
+    return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in country.upper())
+
+
+def choice_name(p):
+    return " · ".join(filter(None, [p["personaname"], flag(p.get("countrycode")), str(p["account_id"])]))[:100]
+
+
+def confirm_embed(player, history):
+    """Private card asking 'is this you?' before a Link is made."""
+    url = player.get("profileurl")
+    embed = discord.Embed(title=player["personaname"], url=url, color=discord.Color.gold(),
+                          description="Is this your Steam account?")
+    if avatar := player.get("avatarfull") or player.get("avatarmedium"):
+        embed.set_thumbnail(url=avatar)
+    country = player.get("countrycode")
+    if country:
+        embed.add_field(name="Country", value=f"{flag(country)} {country}")
+    embed.add_field(name="Deadlock Matches", value=f"{len(history):,}" if history else "None found")
+    if history:
+        last = max(m["start_time"] + m["match_duration_s"] for m in history)
+        embed.add_field(name="Last played", value=f"<t:{last}:R>")
+    embed.set_footer(text=f"Account ID {player['account_id']}")
+    return embed
+
+
+class ConfirmLink(discord.ui.View):
+    def __init__(self, cog, account_id, name):
+        super().__init__(timeout=120)
+        self.cog, self.account_id, self.name = cog, account_id, name
+
+    async def finish(self, interaction, content):
+        self.stop()
+        await interaction.response.edit_message(content=content, embed=None, view=None)
+
+    @discord.ui.button(label="That's me", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction, button):
+        bot_db = self.cog.bot.db
+        # re-checked: someone else may have linked this Player while the card was open
+        taken = db.get_link_by_account(bot_db, self.account_id)
+        if taken and taken["member_id"] != interaction.user.id:
+            return await self.finish(interaction, "That Player was just linked to another Member.")
+        db.set_link(bot_db, interaction.user.id, self.account_id, int(time.time()))
+        await self.finish(interaction, f"Linked to **{self.name}**.")
+        await interaction.followup.send(f"Linked {interaction.user.mention} to **{self.name}**.")
+
+    @discord.ui.button(label="Not me", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction, button):
+        await self.finish(interaction, "Not linked. Run /link again and pick a different account, "
+                                       "or paste your Steam profile URL.")
 
 
 class Link(commands.Cog):
@@ -64,24 +125,26 @@ class Link(commands.Cog):
                 "I couldn't read that. Type your Steam name and pick yourself from the suggestions, "
                 "or give a Steam ID or steamcommunity.com profile URL.",
                 ephemeral=True)
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         try:
             if vanity:
-                account_id = await resolve_vanity(vanity.group(1))
+                account_id = await resolve_vanity(vanity.group(1), self.bot.api)
                 if account_id is None:
                     return await interaction.followup.send("No Steam profile has that custom URL.", ephemeral=True)
             taken = db.get_link_by_account(self.bot.db, account_id)
             if taken and taken["member_id"] != interaction.user.id:
                 return await interaction.followup.send("That Player is already linked to another Member.", ephemeral=True)
             found = await self.bot.api.get("/v1/players/steam", account_ids=account_id)
+            history = await self.bot.api.get(f"/v1/players/{account_id}/match-history") if found else None
         except APIError as e:
             return await interaction.followup.send(str(e), ephemeral=True)
         if not found:
             return await interaction.followup.send(
                 "I couldn't find that Player on deadlock-api.com (wrong ID, or they opted out of data sharing).",
                 ephemeral=True)
-        db.set_link(self.bot.db, interaction.user.id, account_id, int(time.time()))
-        await interaction.followup.send(f"Linked {interaction.user.mention} to **{found[0]['personaname']}**.")
+        name = found[0]["personaname"]
+        await interaction.followup.send(embed=confirm_embed(found[0], history or []),
+                                        view=ConfirmLink(self, account_id, name), ephemeral=True)
 
     @link.autocomplete("player")
     async def player_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -93,8 +156,7 @@ class Link(commands.Cog):
         except APIError:
             return []
         # value is the account ID, so picking a suggestion goes through parse_player
-        return [app_commands.Choice(name=f"{p['personaname']} ({p['account_id']})"[:100], value=str(p["account_id"]))
-                for p in found]
+        return [app_commands.Choice(name=choice_name(p), value=str(p["account_id"])) for p in found]
 
     @app_commands.command(name="unlink", description="Remove your Link and close your Recap Thread.")
     async def unlink(self, interaction: discord.Interaction):
