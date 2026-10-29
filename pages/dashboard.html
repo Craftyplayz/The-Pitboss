@@ -216,11 +216,11 @@ function full(M,b,base){const me=M.pl.find(x=>x.id==b)||M.pl.find(x=>byId[x.id])
   <div class="grid"><div class="card s5"><h2>Final build <small>${me.nm}</small></h2><div class="items">${me.items.map(i=>`<div class="it ${D.IT[i][2]}"><img src="${D.IT[i][1]}" alt="" loading="lazy" title="${f(D.IT[i][3])} souls">${D.IT[i][0]}</div>`).join('')}</div><div style="margin-top:auto;padding-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px">${[['K/D/A',me.k+'/'+me.d+'/'+me.a],['Damage',f(me.dmg)],['Healing',f(me.heal)],['Accuracy',me.acc+'%'],['Level',me.lvl],['Upgrades',f(sum(me.items.map(i=>D.IT[i][3])))+' souls']].map(([l,v])=>`<div><div class="mu" style="font-size:11px;text-transform:uppercase;letter-spacing:.07em">${l}</div><b style="font-size:16px">${v}</b></div>`).join('')}</div><div class="mu" style="padding-top:10px;font-size:11px">Click a scoreboard row to switch player.</div></div>
   <div class="card s7"><h2>Team comparison</h2><div class="fl">${cmp('Souls','nw')}${cmp('Kills','k')}${cmp('Assists','a')}${cmp('Deaths','d')}${cmp('Damage','dmg')}${cmp('Healing','heal')}${cmp('Last hits','lh')}</div></div></div>
   <div class="grid">${team(0)}${team(1)}</div>`}
-function matches(a,b){const SM=SMF,full=SM,sel=SM.find(m=>m.id==a)||full[0];
+function matches(a,b){const SM=SMF,sel=SM.find(m=>m.id==a)||SM[0];
  if(!sel){split('matches','Matches','No matches in 30 days','','<div class="card s12"><p class="mu">No matches in the last 30 days.</p></div>',!!a);return}
  if(!MMid[sel.id]&&!ST[sel.id]){ST[sel.id]='loading';load('/api/match/'+sel.id,x=>{if(x)MMid[x.id]=x;else ST[sel.id]='none'})}
  const row=m=>{const M=MMid[m.id],lp=m.pl;return `<a class="li ${m===sel?'sel':''}" href="#matches/${m.id}"><div class="r1">${pill(lp[0][6])}<span class="nm" style="display:flex;gap:4px">${lp.slice(0,5).map(x=>hi(x[1],'hi hs')).join('')}</span><span class="mu">${ago(m.t)}</span></div><div class="r2"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${lp.map(x=>nm(x[0])).join(', ')}</span><span>${mm(m.dur)}</span></div>${M?`<div class="r2" style="margin-top:8px"><span style="width:90px">${TN[M.win]} win</span><div style="flex:1">${spark(M.tc[0].map((v,i)=>v-M.tc[1][i]),24,1,1.5)}</div></div>`:''}</a>`};
- const list=`<div class="sec">Last 30 days</div>${full.map(row).join('')}`;
+ const list=`<div class="sec">Last 30 days</div>${SM.map(row).join('')}`;
  const M=MMid[sel.id];let det;
  if(M)det=full(M,b,'matches/'+M.id);
  else if(ST[sel.id]==='loading')det='<div class="grid"><div class="card s12"><p class="mu">Loading match…</p></div></div>';
