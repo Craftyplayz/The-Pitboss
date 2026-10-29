@@ -12,6 +12,8 @@ class DeadlockAPI:
         self.key = key
         self.session = None
         self._heroes = None
+        self._items = None
+        self._ranks = None
 
     async def start(self):
         headers = {"X-API-KEY": self.key} if self.key else {}
@@ -45,6 +47,18 @@ class DeadlockAPI:
             data = await self.get("/v1/assets/heroes", only_active=True)
             self._heroes = {h["id"]: h for h in data if h.get("player_selectable")}
         return self._heroes
+
+    async def items(self):
+        """{item_id: item asset dict}. Cached until restart."""
+        if self._items is None:
+            self._items = {i["id"]: i for i in await self.get("/v1/assets/items")}
+        return self._items
+
+    async def ranks(self):
+        """{tier: rank asset dict}. Cached until restart."""
+        if self._ranks is None:
+            self._ranks = {r["tier"]: r for r in await self.get("/v1/assets/ranks")}
+        return self._ranks
 
     async def hero_name(self, hero_id):
         hero = (await self.heroes()).get(hero_id)

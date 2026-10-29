@@ -1,6 +1,6 @@
 import unittest
 
-from cogs.link import parse_player
+from cogs.link import VANITY_RE, parse_player
 
 S = 76561197960265728
 
@@ -17,6 +17,15 @@ class ParsePlayer(unittest.TestCase):
     def test_rejects(self):
         for t in ("", "abc", "0", str(S), "https://steamcommunity.com/id/foo", "-5", str(S + 2**32)):
             self.assertIsNone(parse_player(t), t)
+
+
+class Vanity(unittest.TestCase):
+    def test_match(self):
+        for u in ("https://steamcommunity.com/id/foo-bar_1/", "steamcommunity.com/id/foo-bar_1",
+                  "http://www.steamcommunity.com/id/foo-bar_1"):
+            self.assertEqual(VANITY_RE.match(u).group(1), "foo-bar_1")
+        for t in ("foo", "steamcommunity.com/profiles/123", "evil.com/steamcommunity.com/id/foo"):
+            self.assertIsNone(VANITY_RE.match(t), t)
 
 
 if __name__ == "__main__":
