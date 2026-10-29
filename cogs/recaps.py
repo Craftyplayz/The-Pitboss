@@ -69,15 +69,15 @@ def build_embed(match, history, hero_names, member):
 
 
 def add_site_links(post, match, account_id, hero_name):
-    """Point the recap at the website: the author name opens the profile, link buttons open the rest.
-    Links in embed text would show blue; author names and buttons stay white."""
+    """Point the recap at the website: the author name opens the profile, the title opens the match,
+    link buttons open the home page, leaderboards and hero. Author names and buttons stay white; the title shows blue."""
     links = site_links(account_id, match["match_id"], match["hero_id"])
     embed = post["embeds"][0] if "embeds" in post else post["embed"]
     embed.set_author(name=embed.author.name, icon_url=embed.author.icon_url, url=links["player"])
+    embed.url = links["match"]
     view = discord.ui.View(timeout=None)
-    for label, key, row in (("View match", "match", 0), (f"{hero_name} stats", "hero", 0), ("Profile", "player", 0),
-                            ("Leaderboards", "leaderboards", 1), ("The Pitboss", "home", 1)):
-        view.add_item(discord.ui.Button(label=label, url=links[key], row=row))
+    for label, key in (("The Pitboss", "home"), ("Leaderboards", "leaderboards"), (f"{hero_name} stats", "hero")):
+        view.add_item(discord.ui.Button(label=label, url=links[key]))
     post["view"] = view
     return post
 

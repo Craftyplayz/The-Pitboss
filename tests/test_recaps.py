@@ -119,11 +119,10 @@ class SiteLinks(unittest.IsolatedAsyncioTestCase):  # discord.ui.View needs a ru
             add_site_links(post, {"match_id": 7, "hero_id": 3}, 55, "Celeste")
             self.assertEqual(embed.author.url, f"{SITE_URL}/#players/55")
             self.assertEqual(embed.author.icon_url, "https://x/a.png")
-            buttons = {b.label: (b.url, b.row) for b in post["view"].children}
-            self.assertEqual(buttons, {
-                "View match": (f"{SITE_URL}/#matches/7/55", 0), "Celeste stats": (f"{SITE_URL}/#heroes/3", 0),
-                "Profile": (f"{SITE_URL}/#players/55", 0), "Leaderboards": (f"{SITE_URL}/#leaderboards", 1),
-                "The Pitboss": (f"{SITE_URL}/", 1)})
+            self.assertEqual(embed.url, f"{SITE_URL}/#matches/7/55")
+            buttons = [(b.label, b.url) for b in post["view"].children]
+            self.assertEqual(buttons, [("The Pitboss", f"{SITE_URL}/"), ("Leaderboards", f"{SITE_URL}/#leaderboards"),
+                                       ("Celeste stats", f"{SITE_URL}/#heroes/3")])
 
 
 class CheckMember(unittest.IsolatedAsyncioTestCase):
