@@ -1,6 +1,6 @@
 # Trophies plan
 
-Status: plan only, nothing built yet. Thresholds are based on one real Player, Ravenye (account 54718219). Check them against all Linked Members before building (see "Calibration").
+Status: plan only, nothing built yet. Thresholds are based on a small sample of real matches. Check them against all Linked Members before building (see "Calibration").
 
 ## How trophies work
 
@@ -23,7 +23,7 @@ Status: plan only, nothing built yet. Thresholds are based on one real Player, R
 
 Metadata stats get added to per-player totals in the database each time a Recap runs.
 
-### Ravenye's per-match averages (the baseline)
+### Per-match averages (the baseline)
 
 | Stat | Average | Source |
 |---|---|---|
@@ -38,7 +38,7 @@ Metadata stats get added to per-player totals in the database each time a Recap 
 | Healing | 6,650 | 12 matches |
 | Items bought | ~15 total, ~5 per type | 12 matches |
 
-Ravenye buys almost only Spirit items (12.4 Spirit, 2.4 Vitality, 0.3 Weapon per match), so item tiers assume an even ~5 per type.
+Players often favour one item type, so item tiers assume an even ~5 per type.
 
 ## Display
 
@@ -71,7 +71,7 @@ Each cell is the tier name, then the threshold.
 
 ### Kill style (since Link only)
 
-Ravenye mostly gets ability kills (0.17 headshots per match), so these thresholds use the average over all 144 players in Ravenye's last 12 matches: 0.38 headshot, 0.83 melee and 3.4 ability kills per match.
+Thresholds use the average over 144 players across 12 matches: 0.38 headshot, 0.83 melee and 3.4 ability kills per match.
 
 | Family | 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
 |---|---|---|---|---|---|---|---|
@@ -163,7 +163,7 @@ When a new hero comes out, Diamond needs it too. Players who already have Diamon
 
 \* since Link only.
 
-Ravenye won 4 of 41 wins in under 25 min, 2 under 20 min, and one in 11 min. Accuracy across 144 players: average 50%, top 10% at 64%+, best 73%.
+Sample: about 1 in 10 wins took under 25 min, 1 in 20 under 20 min. Accuracy across 144 players: average 50%, top 10% at 64%+, best 73%.
 
 ---
 
@@ -171,7 +171,7 @@ Ravenye won 4 of 41 wins in under 25 min, 2 under 20 min, and one in 11 min. Acc
 
 - **Storage**: `player_totals(account_id, stat, value)` for since-Link sums. `trophies(account_id, trophy, tier, earned_at, match_id)` for earned trophies, so "newest" and rarity are one query each.
 - **Metadata fields (checked)**: final `stats[-1]` has `player_damage`, `player_damage_taken` and `player_healing`. `items[]` lists every purchase with `item_id` and `sold_time_s`; keep only assets with `type == "upgrade"` and group by `item_slot_type`. Kill times for multi-kills come from each enemy's `death_details[]` (`game_time_s`, `killer_player_slot`). Kill style uses `headshot_kills`, `melee_kills` and `ability_kills`; accuracy is `shots_hit / (shots_hit + shots_missed)`. MVP is the player's `mvp_rank` (1, 2 or 3 for the top three players, missing for the rest).
-- **Calibration**: before building, compute the median per match for each stat across all Linked Members, not just Ravenye, and re-check the tier table above.
+- **Calibration**: before building, compute the median per match for each stat across all Linked Members and re-check the tier table above.
 
 ## Open questions
 
