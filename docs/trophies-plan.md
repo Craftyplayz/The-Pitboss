@@ -18,8 +18,8 @@ Status: plan only, nothing built yet. Thresholds are based on one real Player, R
 
 | Source | What it covers | Stats |
 |---|---|---|
-| Match history (already fetched) | Every match the Player ever played | kills, deaths, assists, souls, wins, losses, streaks, matches, time played, heroes, souls/min, match length, Untouchable, Feeder |
-| Match metadata (fetched by Match Recaps) | Only matches since the Link, plus the 30-day Backfill | healing, damage dealt, damage taken, item purchases, multi-kills |
+| Match history (already fetched) | Every match the Player ever played | kills, deaths, assists, souls, wins, losses, streaks, Daily Grind, matches, time played, heroes, souls/min, match length, Stomp, Untouchable, Feeder |
+| Match metadata (fetched by Match Recaps) | Only matches since the Link, plus the 30-day Backfill | healing, damage dealt, damage taken, item purchases, multi-kills, kill style, MVP, accuracy |
 
 Metadata stats get added to per-player totals in the database each time a Recap runs.
 
@@ -64,6 +64,16 @@ Each cell is the tier name, then the threshold.
 
 \* since Link only.
 
+### Kill style (since Link only)
+
+Ravenye mostly gets ability kills (0.17 headshots per match), so these thresholds use the average over all 144 players in Ravenye's last 12 matches: 0.38 headshot, 0.83 melee and 3.4 ability kills per match.
+
+| Family | 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
+|---|---|---|---|---|---|---|---|
+| **Headshot kills** | Lucky Shot — 1 | Crack Shot — 4 | Marksman — 20 | Deadeye — 40 | Skull Splitter — 100 | Sniper Elite — 200 | One Tap — 400 |
+| **Melee kills** | Scuffle — 2 | Brawler — 8 | Knuckle Sandwich — 40 | Pugilist — 80 | Heavyweight — 200 | Fist of Fury — 400 | Knockout King — 800 |
+| **Ability kills** | Cantrip — 10 | Spellslinger — 35 | Hexer — 175 | Evoker — 350 | Warlock — 850 | Grand Warlock — 1,750 | Arcane Executioner — 3,500 |
+
 ### Economy
 
 | Family | 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
@@ -85,6 +95,18 @@ Streaks aren't totals, so they keep their own 5 tiers:
 |---|---|---|---|---|---|
 | **Win streak** (best ever) | On a Roll — 3 | Hot Streak — 5 | Unstoppable — 7 | Dominating — 10 | Godlike — 12 |
 | **Lose streak** (worst ever) | Rough Patch — 3 | Tilted — 5 | Cursed — 7 | Rock Bottom — 10 | Uninstall? — 12 |
+
+**MVP** (since Link only): matches where the Player was the match MVP (`mvp_rank` 1). Each match has one MVP, so an average player gets one about every 12 matches. Tiers 3–7 follow the matches-to-reach rule. Tiers 1–2 can't, because they would need less than 1 MVP.
+
+| 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
+|---|---|---|---|---|---|---|
+| Standout — 1 | Star Player — 3 | MVP — 5 | Clutch — 10 | Franchise Player — 20 | Hall of Famer — 40 | GOAT — 80 |
+
+**Daily Grind**: most days in a row with at least one match (best ever, full history). A day runs midnight to midnight in the server's timezone.
+
+| Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 | Tier 6 |
+|---|---|---|---|---|---|
+| Back for More — 2 days | Hooked — 4 days | Week-Long Grind — 7 days | Can't Stop — 10 days | Two-Week Grind — 14 days | Month in the Pit — 30 days |
 
 ### Items (since Link only)
 
@@ -131,15 +153,19 @@ When a new hero comes out, Diamond needs it too. Players who already have Diamon
 | **Multi-kill** \* (≤10s between kills) | Triple Kill — 3 | Quad Kill — 4 | Penta Kill — 5 | Wipeout — 6 (whole team) | — |
 | **Untouchable** (win with 0 deaths) | Clean Sheet — any win | Untouchable — 10+ K+A | Flawless — 20+ K+A | Perfection — 25+ K+A | — |
 | **Feeder** (deaths in one match) | Feeder — 12 | Soul Donor — 15 | Open Buffet — 18 | All-You-Can-Eat — 22 | — |
+| **Stomp** (win in under) | Quick Win — 25 min | Stomp — 22 min | Steamroll — 20 min | Blowout — 17 min | Speedrun — 15 min |
+| **Accuracy** \* (200+ shots fired) | Steady Hand — 60% | Precise — 65% | Laser — 70% | Aimbot? — 75% | — |
 
 \* since Link only.
+
+Ravenye won 4 of 41 wins in under 25 min, 2 under 20 min, and one in 11 min. Accuracy across 144 players: average 50%, top 10% at 64%+, best 73%.
 
 ---
 
 ## Build notes (for later)
 
 - **Storage**: `player_totals(account_id, stat, value)` for since-Link sums. `trophies(account_id, trophy, tier, earned_at, match_id)` for earned trophies, so "newest" and rarity are one query each.
-- **Metadata fields (checked)**: final `stats[-1]` has `player_damage`, `player_damage_taken` and `player_healing`. `items[]` lists every purchase with `item_id` and `sold_time_s`; keep only assets with `type == "upgrade"` and group by `item_slot_type`. Kill times for multi-kills come from each enemy's `death_details[]` (`game_time_s`, `killer_player_slot`).
+- **Metadata fields (checked)**: final `stats[-1]` has `player_damage`, `player_damage_taken` and `player_healing`. `items[]` lists every purchase with `item_id` and `sold_time_s`; keep only assets with `type == "upgrade"` and group by `item_slot_type`. Kill times for multi-kills come from each enemy's `death_details[]` (`game_time_s`, `killer_player_slot`). Kill style uses `headshot_kills`, `melee_kills` and `ability_kills`; accuracy is `shots_hit / (shots_hit + shots_missed)`. MVP is the player's `mvp_rank` (1, 2 or 3 for the top three players, missing for the rest).
 - **Calibration**: before building, compute the median per match for each stat across all Linked Members, not just Ravenye, and re-check the tier table above.
 
 ## Open questions
