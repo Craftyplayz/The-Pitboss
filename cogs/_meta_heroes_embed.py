@@ -17,7 +17,8 @@ def heroes_embed(rows, heroes, hero_emojis, sort, rank_name, days):
 
     embed = discord.Embed(title=f"Heroes by {'win' if by_win else 'pick'} rate", color=discord.Color.gold())
     embed.set_author(name=f"Hero meta · last {days} days" + (f" · {rank_name}" if rank_name else ""))
-    embed.set_footer(text=f"Pick rate = share of all hero picks · last {days} days")
+    # 12 heroes per match, each at most once, so matches = picks / 12
+    embed.set_footer(text=f"Pick = share of all hero picks · In = share of matches the hero is in · last {days} days")
     if not rows:
         embed.description = "No matches in this window."
         return embed
@@ -32,7 +33,8 @@ def heroes_embed(rows, heroes, hero_emojis, sort, rank_name, days):
     for i, r in enumerate(rows, 1):
         w = _wr(r["wins"], r["matches"])
         icon = hero_emojis.get(r["hero_id"], "")
-        lines.append(f"`{i}.` {icon} **{name(r)}** · {'▲' if w >= 50 else '▼'}{w:.1f}% · {100 * r['matches'] / total:.1f}%".replace("  ", " "))
+        pick = 100 * r['matches'] / total
+        lines.append(f"`{i}.` {icon} **{name(r)}** · {'▲' if w >= 50 else '▼'}{w:.1f}% · {pick:.1f}% · {12 * pick:.0f}%".replace("  ", " "))
 
     cols = 3
     while True:  # more columns (wrapping to extra rows) only if 3 would overflow a field
@@ -42,5 +44,5 @@ def heroes_embed(rows, heroes, hero_emojis, sort, rank_name, days):
             break
         cols += 1
     for n, c in enumerate(chunks):
-        embed.add_field(name="Hero · win · pick" if n == 0 else "\u200b", value=c)
+        embed.add_field(name="Hero · win · pick · in" if n == 0 else "\u200b", value=c)
     return embed

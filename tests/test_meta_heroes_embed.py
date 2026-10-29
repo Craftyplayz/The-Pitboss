@@ -31,6 +31,12 @@ def test_sizes():
     assert len(e.fields) >= 3
 
 
+def test_match_share():
+    # one match, 12 heroes: each is 1/12 of picks and in 100% of matches
+    rows = [{"hero_id": i, "wins": 1, "matches": 1} for i in range(1, 13)]
+    assert lines(heroes_embed(rows, HEROES, {}, "pick", None, 7))[0].endswith("· 8.3% · 100%")
+
+
 def test_missing_emoji():
     e = heroes_embed(ROWS, HEROES, {}, "win", None, 7)
     assert "`1.` **Hero44**" in lines(e)[0]
