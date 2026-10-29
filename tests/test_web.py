@@ -86,6 +86,7 @@ class Dashboard(unittest.TestCase):
         self.assertEqual(item_icon({"image": "a.png", "shop_image": "b.png"}), "a.png")
         self.assertEqual(item_icon({"shop_image": "b.png"}), "b.png")  # e.g. Stalker
         self.assertEqual(item_icon({}), "")
+        self.assertEqual(item_icon({"image": "parry.svg", "shop_image": "rebuttal.png"}), "rebuttal.png")
 
     def test_render_page_cannot_close_script(self):
         page = render_page("<script>const D=/*DATA*/null;</script>", {"n": "</script><script>alert(1)</script>"})

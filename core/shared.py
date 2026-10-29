@@ -20,8 +20,12 @@ def site_links(account_id, match_id, hero_id):
 
 
 def item_icon(item):
-    """An item asset's icon URL. Some upgrades (e.g. Stalker, Spellslinger) only have a shop_image."""
-    return item.get("image") or item.get("shop_image") or ""
+    """An item asset's icon URL. Some upgrades (e.g. Stalker, Spellslinger) only have a shop_image.
+    An SVG image (Rebuttal, Counterspell: a generic parry icon) loses to the shop_image, since Discord emojis can't be SVG."""
+    image = item.get("image") or ""
+    if image.endswith(".svg") and item.get("shop_image"):
+        return item["shop_image"]
+    return image or item.get("shop_image") or ""
 
 
 def won(match):
