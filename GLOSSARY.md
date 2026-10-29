@@ -52,7 +52,7 @@ A rule-based comparison computed from stats, such as a hero win rate against the
 _Avoid_: Analysis, tip
 
 **Match Recap**:
-A message the bot posts on its own after a Linked Member finishes a Match. On linking, every Match from the 30 days before the Link gets one (the Backfill). After that, a Match missed for more than 24 hours gets none.
+A message the bot posts on its own after a Linked Member finishes a Match. On linking, every Match from the 30 days before the Link gets one (the Backfill). After that, a Match missed for more than 24 hours gets none. /rebuild-recaps (admins) deletes every Recap Thread and posts all those recaps again in new ones.
 _Avoid_: Notification, alert, match post
 
 **Scrim**:

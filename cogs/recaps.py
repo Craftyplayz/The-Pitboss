@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 
 from core import db
@@ -30,19 +31,21 @@ def match_end(match):
     return match["start_time"] + match["match_duration_s"]
 
 
-def due_matches(history, linked_at, last_match_id, now):
+def due_matches(history, linked_at, last_match_id, now, rebuilt_at=0):
     """Return (Matches to recap oldest first, match_id to advance past without posting, or None).
 
     Backfill Matches (ended up to BACKFILL before the Link) always get a recap. Matches after the
-    Link only do within MAX_AGE; the skip id is the newest one older than that.
+    Link only do within MAX_AGE; the skip id is the newest one older than that. After /rebuild-recaps,
+    every Match that ended before the rebuild counts as Backfill, so the new thread gets all of them again.
     """
+    until = max(linked_at, rebuilt_at)
     fresh = sorted(
         (m for m in history
          if match_end(m) > linked_at - BACKFILL and (last_match_id is None or m["match_id"] > last_match_id)),
         key=lambda m: m["match_id"],
     )
-    backfill = [m for m in fresh if match_end(m) <= linked_at]
-    after = [m for m in fresh if match_end(m) > linked_at]
+    backfill = [m for m in fresh if match_end(m) <= until]
+    after = [m for m in fresh if match_end(m) > until]
     recap = backfill + [m for m in after if now - match_end(m) <= MAX_AGE]
     recap.sort(key=lambda m: m["match_id"])
     # advancing past a skipped Match while backfill is pending could jump over unposted backfill
@@ -133,30 +136,12 @@ async def avatar_file(member):
     return discord.File(io.BytesIO(data), "avatar.png")
 
 
-async def add_avatar(thread, member):
-    """Put the Member's avatar first on the Recap Thread's first message, so the forum list shows it as the
-    post's image instead of a recap graph. For threads made before the avatar starter; the recap stays as it was."""
-    try:
-        first = await thread.fetch_message(thread.id)
-        if any(a.filename == "avatar.png" for a in first.attachments) or not (file := await avatar_file(member)):
-            return
-        archived = thread.archived
-        if archived:  # an archived thread's messages can't be edited
-            await thread.edit(archived=False)
-        await first.edit(attachments=[file, *first.attachments])
-        if archived:
-            await thread.edit(archived=True)
-    except discord.HTTPException as e:
-        print(f"recaps: avatar on {thread.id} failed: {e}")
-
-
 class Recaps(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.emojis = ItemEmojis(bot)
         self.locks = {}  # member_id -> Lock, so the loop and recap_now never check one Member at once
         self.tasks = set()  # keeps recap_now tasks referenced until they finish
-        self.avatar_checked = set()  # Recap Thread ids whose first message had its avatar checked since startup
 
     async def cog_load(self):
         self.recap_loop.start()
@@ -197,6 +182,43 @@ class Recaps(commands.Cog):
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
+    @app_commands.command(name="rebuild-recaps",
+                          description="Delete every Recap Thread and post all their recaps again in new ones.")
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.guild_only()
+    async def rebuild_recaps(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        deleted, failed = await self.rebuild(int(time.time()))
+        text = (f"Deleted {deleted} Recap Thread{'s' * (deleted != 1)}. New ones fill in over the next hour or so: "
+                f"{RECAPS_PER_RUN} recaps per member every 5 minutes.")
+        if failed:
+            text += f" I couldn't delete {failed} (I need Manage Threads in the recap forum); those keep their old thread."
+        await interaction.followup.send(text, ephemeral=True)
+
+    async def rebuild(self, now):
+        """Delete each Linked Member's Recap Thread and reset their recap progress, so the loop posts it all again.
+        Returns (threads deleted, threads that couldn't be). A Member whose thread can't be deleted keeps it as is."""
+        db.set_setting(self.bot.db, "recap_rebuild_at", now)  # before any reset, so no Match is skipped as too old
+        deleted = failed = 0
+        for row in db.all_links(self.bot.db):
+            async with self.locks.setdefault(row["member_id"], asyncio.Lock()):  # not mid-post
+                link = db.get_link(self.bot.db, row["member_id"])
+                if link is None:
+                    continue
+                if link["thread_id"]:
+                    try:
+                        thread = self.bot.get_channel(link["thread_id"]) or await self.bot.fetch_channel(link["thread_id"])
+                        await thread.delete()
+                        deleted += 1
+                    except discord.NotFound:
+                        pass  # already gone
+                    except discord.HTTPException as e:
+                        print(f"recaps: deleting thread {link['thread_id']} failed: {e}")
+                        failed += 1
+                        continue
+                db.update_link(self.bot.db, link["member_id"], thread_id=None, last_match_id=None)
+        return deleted, failed
+
     @tasks.loop(minutes=5)
     async def recap_loop(self):
         if not (ctx := await self.context()):
@@ -215,15 +237,12 @@ class Recaps(commands.Cog):
         # shortcut: bot-friended accounts hit the live path (10 req/h per IP, shared by all of them), so
         # their checks may get rate-limited; add DEADLOCK_API_KEY (300 req/h) when that shows up in logs
         history = await self.bot.api.get(f"/v1/players/{link['account_id']}/match-history") or []
-        recap, skip_to = due_matches(history, link["linked_at"], link["last_match_id"], time.time())
+        rebuilt_at = int(db.get_setting(self.bot.db, "recap_rebuild_at") or 0)
+        recap, skip_to = due_matches(history, link["linked_at"], link["last_match_id"], time.time(), rebuilt_at)
         if skip_to is not None:
             db.update_link(self.bot.db, member.id, last_match_id=skip_to)
         recap = recap[:RECAPS_PER_RUN]
-        unchecked = link["thread_id"] is not None and link["thread_id"] not in self.avatar_checked
-        thread = await self.usable_thread(forum, link["thread_id"]) if recap or unchecked else None
-        if thread and thread.id not in self.avatar_checked:
-            self.avatar_checked.add(thread.id)
-            await add_avatar(thread, member)
+        thread = await self.usable_thread(forum, link["thread_id"]) if recap else None
         latest = None  # (message, title) of the newest recap posted this run
         for match in recap:
             # insights compare against earlier Matches only, so backfilled recaps don't see the future
@@ -242,7 +261,6 @@ class Recaps(commands.Cog):
                     content=f"Match Recaps for **{discord.utils.escape_markdown(member.display_name)}**",
                     **({"file": avatar} if avatar else {}))
                 thread = created.thread
-                self.avatar_checked.add(thread.id)
                 db.update_link(self.bot.db, member.id, thread_id=thread.id)
             await asyncio.sleep(POST_DELAY)
             latest = await thread.send(**post), post_title(post)

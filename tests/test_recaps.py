@@ -82,6 +82,12 @@ class DueMatches(unittest.TestCase):
     def test_before_backfill_window_does_not_advance(self):
         self.assertEqual(due_matches([m(1, 34 * 86400)], LINKED, None, NOW), ([], None))
 
+    def test_rebuild_posts_old_matches_after_the_link_again(self):
+        old = m(5, 2 * 86400)  # a day after the Link, past MAX_AGE
+        self.assertEqual(due_matches([old], LINKED, None, NOW), ([], 5))
+        self.assertEqual(ids(due_matches([old], LINKED, None, NOW, rebuilt_at=NOW)[0]), [5])
+        self.assertIsNone(due_matches([old], LINKED, None, NOW, rebuilt_at=NOW)[1])
+
     def test_exactly_max_age_still_posted(self):
         self.assertEqual(ids(due_matches([m(1, MAX_AGE)], LINKED, None, NOW)[0]), [1])
 
@@ -231,28 +237,6 @@ class Avatar(unittest.IsolatedAsyncioTestCase):
         member.display_avatar.with_static_format.return_value.with_size.return_value.read = AsyncMock(return_value=b"png")
         return thread, first, member
 
-    async def test_avatar_goes_first_and_recap_images_stay(self):
-        from cogs.recaps import add_avatar
-        thread, first, member = self.setup_thread(["souls.png", "scoreboard.png"])
-        await add_avatar(thread, member)
-        files = first.edit.await_args.kwargs["attachments"]
-        self.assertEqual(files[0].filename, "avatar.png")
-        self.assertEqual(files[1:], first.attachments)
-        thread.edit.assert_not_awaited()
-
-    async def test_already_has_avatar(self):
-        from cogs.recaps import add_avatar
-        thread, first, member = self.setup_thread(["avatar.png"])
-        await add_avatar(thread, member)
-        first.edit.assert_not_awaited()
-
-    async def test_archived_thread_is_reopened_then_archived_again(self):
-        from cogs.recaps import add_avatar
-        thread, first, member = self.setup_thread(["souls.png"], archived=True)
-        await add_avatar(thread, member)
-        self.assertEqual([c.kwargs for c in thread.edit.await_args_list], [{"archived": False}, {"archived": True}])
-        first.edit.assert_awaited_once()
-
     async def test_new_thread_opens_with_avatar_then_recap(self):
         import time
         from unittest.mock import AsyncMock, patch
@@ -282,15 +266,22 @@ class Avatar(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_link(bot.db, 5)["thread_id"], 42)
         self.assertEqual(header.await_args.args[0], thread)
 
-    async def test_avatar_download_failure_changes_nothing(self):
+    async def test_rebuild_deletes_threads_and_resets_progress(self):
         from unittest.mock import AsyncMock
-        from cogs.recaps import add_avatar
-        thread, first, member = self.setup_thread(["souls.png"])
-        member.display_avatar.with_static_format.return_value.with_size.return_value.read = AsyncMock(
-            side_effect=discord.NotFound(MagicMock(status=404), "gone"))
-        await add_avatar(thread, member)
-        first.edit.assert_not_awaited()
-
+        from cogs.recaps import Recaps
+        from core import db
+        bot = MagicMock()
+        bot.db = db.connect(":memory:")
+        for member, thread in ((1, 10), (2, 20), (3, None)):
+            db.set_link(bot.db, member, 100 + member, 0)
+            db.update_link(bot.db, member, thread_id=thread, last_match_id=50)
+        ok, locked = MagicMock(delete=AsyncMock()), MagicMock(delete=AsyncMock(side_effect=discord.Forbidden(MagicMock(status=403), "no")))
+        bot.get_channel = lambda i: {10: ok, 20: locked}[i]
+        self.assertEqual(await Recaps(bot).rebuild(NOW), (1, 1))
+        ok.delete.assert_awaited_once()
+        state = {r["member_id"]: (r["thread_id"], r["last_match_id"]) for r in db.all_links(bot.db)}
+        self.assertEqual(state, {1: (None, None), 2: (20, 50), 3: (None, None)})  # 2 keeps its thread: no duplicates
+        self.assertEqual(db.get_setting(bot.db, "recap_rebuild_at"), str(NOW))
 
 if __name__ == "__main__":
     unittest.main()
