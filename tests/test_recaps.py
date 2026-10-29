@@ -31,11 +31,22 @@ class DueMatches(unittest.TestCase):
         self.assertEqual(ids(recap), [1, 2, 3])
         self.assertIsNone(skip)
 
-    def test_only_after_link(self):
+    def test_backfill_includes_matches_before_link(self):
         linked = NOW - 1000
         recap, skip = due_matches([m(1, 2000), m(2, 500), m(3, 1000)], linked, None, NOW)
-        self.assertEqual(ids(recap), [2])  # ending exactly at linked_at is not after it
+        self.assertEqual(ids(recap), [1, 2, 3])
         self.assertIsNone(skip)
+
+    def test_backfill_ignores_max_age_but_not_window(self):
+        linked = NOW - 86400
+        history = [m(1, 40 * 86400), m(2, 20 * 86400), m(3, 60)]
+        self.assertEqual(ids(due_matches(history, linked, None, NOW)[0]), [2, 3])
+
+    def test_no_skip_while_backfill_pending(self):
+        linked = NOW - 5 * 86400
+        history = [m(1, 10 * 86400), m(2, 3 * 86400)]  # 1 is backfill, 2 is after the link but too old
+        recap, skip = due_matches(history, linked, None, NOW)
+        self.assertEqual((ids(recap), skip), ([1], None))
 
     def test_started_before_link_but_ended_after(self):
         linked = NOW - 1000
@@ -64,8 +75,8 @@ class DueMatches(unittest.TestCase):
         linked = NOW - 5 * 86400
         self.assertEqual(due_matches([m(1, 2 * 86400)], linked, 1, NOW), ([], None))
 
-    def test_before_link_does_not_advance(self):
-        self.assertEqual(due_matches([m(1, 4 * 86400)], LINKED, None, NOW), ([], None))
+    def test_before_backfill_window_does_not_advance(self):
+        self.assertEqual(due_matches([m(1, 34 * 86400)], LINKED, None, NOW), ([], None))
 
     def test_exactly_max_age_still_posted(self):
         self.assertEqual(ids(due_matches([m(1, MAX_AGE)], LINKED, None, NOW)[0]), [1])

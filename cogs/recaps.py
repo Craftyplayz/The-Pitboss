@@ -1,4 +1,5 @@
 """Match Recaps: post each Linked Member's finished Matches to their Recap Thread."""
+import asyncio
 import time
 from datetime import datetime, timezone
 
@@ -10,7 +11,10 @@ from api import APIError
 from cogs._insights import match_insights
 from cogs._shared import won
 
-MAX_AGE = 24 * 3600  # a Match missed for longer than this gets no recap
+MAX_AGE = 24 * 3600  # a Match after the Link missed for longer than this gets no recap
+BACKFILL = 30 * 86400  # on link, Matches from this long before it get recaps too
+RECAPS_PER_RUN = 10  # per Member per loop run, so a backfill drips out instead of flooding Discord
+POST_DELAY = 2  # seconds between posts
 
 
 def match_end(match):
@@ -20,15 +24,21 @@ def match_end(match):
 def due_matches(history, linked_at, last_match_id, now):
     """Return (Matches to recap oldest first, match_id to advance past without posting, or None).
 
-    The skip id is the newest qualifying Match that ended more than MAX_AGE ago.
+    Backfill Matches (ended up to BACKFILL before the Link) always get a recap. Matches after the
+    Link only do within MAX_AGE; the skip id is the newest one older than that.
     """
     fresh = sorted(
         (m for m in history
-         if match_end(m) > linked_at and (last_match_id is None or m["match_id"] > last_match_id)),
+         if match_end(m) > linked_at - BACKFILL and (last_match_id is None or m["match_id"] > last_match_id)),
         key=lambda m: m["match_id"],
     )
-    recap = [m for m in fresh if now - match_end(m) <= MAX_AGE]
-    skip_to = max((m["match_id"] for m in fresh if now - match_end(m) > MAX_AGE), default=None)
+    backfill = [m for m in fresh if match_end(m) <= linked_at]
+    after = [m for m in fresh if match_end(m) > linked_at]
+    recap = backfill + [m for m in after if now - match_end(m) <= MAX_AGE]
+    recap.sort(key=lambda m: m["match_id"])
+    # advancing past a skipped Match while backfill is pending could jump over unposted backfill
+    skip_to = None if backfill else max(
+        (m["match_id"] for m in after if now - match_end(m) > MAX_AGE), default=None)
     return recap, skip_to
 
 
@@ -94,10 +104,14 @@ class Recaps(commands.Cog):
         recap, skip_to = due_matches(history, link["linked_at"], link["last_match_id"], time.time())
         if skip_to is not None:
             db.update_link(self.bot.db, member.id, last_match_id=skip_to)
+        recap = recap[:RECAPS_PER_RUN]
         thread = await self.usable_thread(forum, link["thread_id"]) if recap else None
         for match in recap:
-            embed = build_embed(match, history, hero_names, member)
+            # insights compare against earlier Matches only, so backfilled recaps don't see the future
+            earlier = [m for m in history if m["match_id"] < match["match_id"]]
+            embed = build_embed(match, earlier, hero_names, member)
             if thread:
+                await asyncio.sleep(POST_DELAY)
                 await thread.send(embed=embed)
             else:
                 thread = (await forum.create_thread(name=member.display_name, embed=embed)).thread
