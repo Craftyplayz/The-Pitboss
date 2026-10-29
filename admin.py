@@ -1,5 +1,7 @@
-"""/admin: password-protected viewer for the API call logs (api-bot.jsonl, api-web.jsonl) the bot and site write."""
+"""/admin: password-protected viewer for the API call logs (api-bot.jsonl, api-web.jsonl) the bot and site write,
+and the raw response body of each call (saved gzipped under bodies/)."""
 import base64
+import gzip
 import hmac
 import html
 import json
@@ -7,6 +9,8 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from aiohttp import web
+
+from core.api import body_path
 
 PAGE_SIZE = 200
 SOURCES = ("bot", "web")
@@ -82,8 +86,11 @@ def render(calls, stats, files, src, q, errors, page):
         when = datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         params = "&".join(f"{k}={v}" for k, v in (c.get("params") or {}).items())
         status = c.get("status")
+        url = f'{html.escape(c.get("url", ""))}<span class="mu">{"?" + html.escape(params) if params else ""}</span>'
+        if isinstance(c.get("body"), str):  # calls logged before bodies were saved have none
+            url = f'<a href="/admin/body/{html.escape(c["body"])}" target="_blank" title="Raw response">{url}</a>'
         rows.append(f'<tr><td><time data-t="{t}">{when}</time></td><td><span class="src {c["src"]}">{c["src"]}</span></td>'
-                    f'<td class="url">{html.escape(c.get("url", ""))}<span class="mu">{"?" + html.escape(params) if params else ""}</span></td>'
+                    f'<td class="url">{url}</td>'
                     f'<td class="{"good" if ok(c) else "bad"}">{html.escape(str(status))}</td>'
                     f'<td class="n">{c.get("ms", 0):,} ms</td><td class="n">{size(c.get("bytes", 0))}</td><td class="n">{c["line"]} B</td></tr>')
 
@@ -113,7 +120,7 @@ td.url{{white-space:normal;word-break:break-all;font-family:Consolas,monospace;f
 .good{{color:var(--up)}}.bad{{color:var(--dn);font-weight:600}}.src{{font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px}}.src.bot{{background:#5865f233;color:#a5adf7}}.src.web{{background:#f0c35a26;color:var(--gold)}}
 .nav{{display:flex;justify-content:space-between;align-items:center;margin:12px 0}}a{{color:var(--gold)}}
 </style></head><body>
-<h1>API calls</h1><div class="mu">Log files: {files_html}</div>
+<h1>API calls</h1><div class="mu">Log files: {files_html}</div><div class="mu">Click an endpoint to see its raw response.</div>
 <div class="tiles">{"".join(f'<div class="tile"><div class="l">{l}</div><div class="v">{v}</div></div>' for l, v in tiles)}</div>
 <form><select name="src"><option value="">Bot + website</option>{"".join(f'<option value="{s}"{" selected" if s == src else ""}>{s}</option>' for s in SOURCES)}</select>
 <input name="q" value="{html.escape(q)}" placeholder="Filter by URL or params"><label><input type="checkbox" name="errors" value="1"{" checked" if errors else ""}> Errors only</label>
@@ -125,12 +132,35 @@ td.url{{white-space:normal;word-break:break-all;font-family:Consolas,monospace;f
 </body></html>"""
 
 
-async def admin(request):
+def guard(request):
     password = request.app["admin_password"]
     if not password:
         raise web.HTTPNotFound()  # no password configured: the page doesn't exist
     if not authorized(request, password):
         raise web.HTTPUnauthorized(headers={"WWW-Authenticate": 'Basic realm="Pitboss admin"'})
+
+
+def bodies_size(log_dir):
+    """(file count, bytes on disk) of the saved response bodies."""
+    files = [p.stat().st_size for p in (log_dir / "bodies").glob("*/*.gz")]
+    return len(files), sum(files)
+
+
+async def body(request):
+    """One saved response body, unzipped, exactly as the API sent it."""
+    guard(request)
+    path = body_path(request.app["log_dir"], request.match_info["digest"])  # the route only lets 64 hex chars through
+    if not path.exists():
+        raise web.HTTPNotFound()
+    raw = gzip.decompress(path.read_bytes())
+    # nosniff: a body is always shown as text, never run as a page
+    kind = "application/json" if raw.lstrip()[:1] in (b"{", b"[") else "text/plain"
+    return web.Response(body=raw, content_type=kind, charset="utf-8",
+                        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+async def admin(request):
+    guard(request)
     log_dir = request.app["log_dir"]
     src = request.query.get("src", "") if request.query.get("src") in SOURCES else ""
     q, errors = request.query.get("q", "")[:200], request.query.get("errors") == "1"
@@ -140,5 +170,8 @@ async def admin(request):
         page = 1
     calls = filter_calls(read_calls(log_dir), src, q, errors)
     files = [(f"api-{s}.jsonl", (log_dir / f"api-{s}.jsonl").stat().st_size) for s in SOURCES if (log_dir / f"api-{s}.jsonl").exists()]
+    n, nbytes = bodies_size(log_dir)
+    if n:
+        files.append((f"bodies/ ({n:,} files)", nbytes))
     return web.Response(text=render(calls, call_stats(calls), files, src, q, errors, page), content_type="text/html",
                         headers={"Cache-Control": "no-store"})

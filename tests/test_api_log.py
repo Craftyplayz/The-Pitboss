@@ -1,3 +1,4 @@
+import gzip
 import json
 import tempfile
 import unittest
@@ -7,7 +8,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from core import api as api_mod
-from core.api import APIError, DeadlockAPI
+from core.api import APIError, DeadlockAPI, body_path
 
 
 class ApiLog(unittest.IsolatedAsyncioTestCase):
@@ -46,6 +47,18 @@ class ApiLog(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lines[0]["params"], {"x": 1, "flag": "true"})
         self.assertEqual(lines[0]["bytes"], len('{"a": 1}'))
         self.assertTrue(all(isinstance(l["t"], int) and l["ms"] >= 0 for l in lines))
+
+    async def test_bodies_saved_gzipped_once_each(self):
+        await self.api.get("/ok")
+        await self.api.get("/ok")
+        await self.api.get("/missing")  # empty body: nothing saved
+        lines = [json.loads(l) for l in self.log.read_text(encoding="utf8").splitlines()]
+        self.assertEqual(lines[0]["body"], lines[1]["body"])
+        self.assertNotIn("body", lines[2])
+        files = list((Path(self.tmp.name) / "bodies").glob("*/*.gz"))
+        self.assertEqual(len(files), 1)  # the repeat call reused the first file
+        self.assertEqual(files[0], body_path(Path(self.tmp.name), lines[0]["body"]))
+        self.assertEqual(json.loads(gzip.decompress(files[0].read_bytes())), {"a": 1})
 
     async def test_no_log_path_and_unwritable_path_never_break_calls(self):
         self.api.log_path = None

@@ -1,4 +1,5 @@
 import base64
+import gzip
 import json
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 import admin
+from core.api import save_body
 
 
 def write(path, calls, junk=False):
@@ -52,10 +54,13 @@ class Page(unittest.IsolatedAsyncioTestCase):
     async def client(self, password):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        write(Path(tmp.name) / "api-web.jsonl", [{"t": 1, "url": "/v1/<b>x", "params": {}, "status": 200, "ms": 5, "bytes": 9}])
+        self.digest = save_body(Path(tmp.name), b'{"raw": "<script>"}')
+        write(Path(tmp.name) / "api-web.jsonl", [{"t": 1, "url": "/v1/<b>x", "params": {}, "status": 200, "ms": 5, "bytes": 9,
+                                                  "body": self.digest}])
         app = web.Application()
         app["log_dir"], app["admin_password"] = Path(tmp.name), password
         app.router.add_get("/admin", admin.admin)
+        app.router.add_get("/admin/body/{digest:[0-9a-f]{64}}", admin.body)
         c = TestClient(TestServer(app))
         await c.start_server()
         self.addAsyncCleanup(c.close)
@@ -80,6 +85,18 @@ class Page(unittest.IsolatedAsyncioTestCase):
         text = await r.text()
         self.assertIn("&lt;b&gt;x", text)  # logged URLs are escaped
         self.assertNotIn("<b>x", text)
+        self.assertIn(f'href="/admin/body/{self.digest}"', text)
+
+    async def test_raw_body(self):
+        c = await self.client("s3cret")
+        url = f"/admin/body/{self.digest}"
+        self.assertEqual((await c.get(url)).status, 401)
+        r = await c.get(url, headers=self.auth("s3cret"))
+        self.assertEqual(await r.read(), b'{"raw": "<script>"}')
+        self.assertEqual(r.content_type, "application/json")
+        self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual((await c.get("/admin/body/" + "0" * 64, headers=self.auth("s3cret"))).status, 404)
+        self.assertEqual((await c.get("/admin/body/..%2F..%2Fx", headers=self.auth("s3cret"))).status, 404)
 
 
 if __name__ == "__main__":

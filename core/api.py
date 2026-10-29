@@ -1,9 +1,31 @@
+import gzip
+import hashlib
 import json
+import os
 import time
 
 import aiohttp
 
 BASE_URL = "https://api.deadlock-api.com"
+
+
+def body_path(log_dir, digest):
+    """Where a saved response body lives: bodies/<first 2 hex>/<sha256>.gz next to the call logs."""
+    return log_dir / "bodies" / digest[:2] / f"{digest}.gz"
+
+
+def save_body(log_dir, body):
+    """Gzip a response body under its sha256 and return the hash. A body seen before isn't written again,
+    so the same match history fetched every 5 minutes costs one file until it changes."""
+    digest = hashlib.sha256(body).hexdigest()
+    path = body_path(log_dir, digest)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # bot and website share the folder: write aside, then rename, so a reader never sees half a file
+        tmp = path.with_name(f"{digest}.{os.getpid()}.tmp")
+        tmp.write_bytes(gzip.compress(body, compresslevel=6))
+        os.replace(tmp, path)
+    return digest
 
 
 class APIError(Exception):
@@ -29,12 +51,20 @@ class DeadlockAPI:
         if self.session:
             await self.session.close()
 
-    def log(self, url, params, status, started, size):
-        """Append one API call to the log file as a JSON line. Never raises: logging must not break a request."""
+    def log(self, url, params, status, started, size, body=b""):
+        """Append one API call to the log file as a JSON line, with the hash of its saved body.
+        Never raises: logging must not break a request."""
         if not self.log_path:
             return
-        line = json.dumps({"t": round(time.time()), "url": url, "params": params, "status": status,
-                           "ms": round((time.monotonic() - started) * 1000), "bytes": size}, separators=(",", ":"))
+        entry = {"t": round(time.time()), "url": url, "params": params, "status": status,
+                 "ms": round((time.monotonic() - started) * 1000), "bytes": size}
+        try:
+            # shortcut: gzip runs on the event loop (~20 ms for a 1 MB match); move to a thread if it shows up as lag
+            if body:
+                entry["body"] = save_body(self.log_path.parent, body)
+        except OSError as e:
+            print(f"api log body: {e}")
+        line = json.dumps(entry, separators=(",", ":"))
         try:
             with open(self.log_path, "a", encoding="utf8") as f:
                 f.write(line + "\n")
@@ -51,7 +81,7 @@ class DeadlockAPI:
 
     async def request(self, method, path, params, payload=None):
         params = {k: str(v).lower() if isinstance(v, bool) else v for k, v in params.items() if v is not None}
-        started, status, size = time.monotonic(), "error", 0
+        started, status, size, body = time.monotonic(), "error", 0, b""
         try:
             async with self.session.request(method, path, params=params, json=payload) as resp:
                 status = resp.status
@@ -67,7 +97,7 @@ class DeadlockAPI:
         except (aiohttp.ClientError, TimeoutError) as e:
             raise APIError("Couldn't reach the Deadlock stats API.") from e
         finally:
-            self.log(path, params, status, started, size)
+            self.log(path, params, status, started, size, body)
 
     async def heroes(self):
         """{hero_id: hero asset dict} for selectable heroes. Cached until restart."""

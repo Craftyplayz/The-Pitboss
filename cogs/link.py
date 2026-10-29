@@ -31,7 +31,7 @@ def parse_player(text):
 async def resolve_vanity(name, api):
     """Custom URL name -> 32-bit account ID via Steam's public profile XML, else None. Logged through `api`."""
     url, params = f"https://steamcommunity.com/id/{name}/", {"xml": 1}
-    started, status, size = time.monotonic(), "error", 0
+    started, status, size, text = time.monotonic(), "error", 0, ""
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
             async with s.get(url, params=params) as resp:
@@ -41,7 +41,7 @@ async def resolve_vanity(name, api):
     except (aiohttp.ClientError, TimeoutError) as e:
         raise APIError("Couldn't reach Steam to look up that custom URL.") from e
     finally:
-        api.log(url, params, status, started, size)
+        api.log(url, params, status, started, size, text.encode())
     return parse_player(m.group(1)) if m else None
 
 

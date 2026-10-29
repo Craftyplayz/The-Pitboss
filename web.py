@@ -174,6 +174,7 @@ def make_app():
     app.on_cleanup.append(stop)
     app.add_routes([web.get("/", index),
                     web.get("/admin", admin.admin),
+                    web.get("/admin/body/{digest:[0-9a-f]{64}}", admin.body),
                     web.get("/api/match/{match_id:\\d+}", match_api),
                     web.get("/api/hero-items/{hero_id:\\d+}", hero_items_api),
                     web.static("/static", ROOT / "static"),
