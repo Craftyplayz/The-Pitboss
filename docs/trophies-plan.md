@@ -44,6 +44,10 @@ Players often favour one item type, so item tiers assume an even ~5 per type.
 
 - **`/profile`**: a small "Trophies — 37 / 140" section showing the 3 newest and 3 rarest trophies. An **All trophies** link button opens the Player's trophy page on the web dashboard.
 - **Web dashboard trophy page**: the full list, grouped by category, with tier, date earned and rarity. Trophies you don't have yet show as locked, with progress (e.g. "Reaper — 1,204 / 1,250 kills").
+- **What's missing**: on the trophy page, trophies that need a set of different things list what the Player hasn't done yet, so they know what to go for:
+  - **Collector**: shop items never bought, grouped by Weapon / Vitality / Spirit, with icons.
+  - **Jack of All Trades**: heroes never won with. Heroes played but never won with are listed first, as the closest.
+  - **Hero mastery**: each hero's next tier and how many more matches it needs (e.g. "Haze: 7 more for Specialist"). Heroes never played are listed separately.
 - **`/trophies [member]`**: replies with the same link button.
 - **Match Recap**: lists every trophy earned in that match ("🏆 Reaper unlocked"). For the top 2 tiers of a family, it also pings the Member:
   - 7-tier families: Master and Eternal
