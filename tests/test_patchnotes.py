@@ -1,5 +1,10 @@
+import asyncio
 import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import discord
+
+from core import db
 from cogs.patchnotes import chunks, new_patches, patch_embeds, to_markdown
 
 # trimmed from real Steam announcements
@@ -48,6 +53,27 @@ class Selection(unittest.TestCase):
         items = [item("Paint the Town", 50), item("Minor Update - 2", 40), item("Minor Update - 1", 30),
                  item("Gameplay Update - 0", 10)]
         self.assertEqual([i["title"] for i in new_patches(items, 20)], ["Minor Update - 1", "Minor Update - 2"])
+
+
+class Backfill(unittest.IsolatedAsyncioTestCase):
+    async def test_posts_whole_history_oldest_first_once(self):
+        import cogs.patchnotes as pn
+        bot = MagicMock()
+        bot.db = db.connect(":memory:")
+        channel, posted = MagicMock(spec=discord.TextChannel), []
+        channel.send = AsyncMock(side_effect=lambda embed, view: posted.append(embed.title) or MagicMock())
+        bot.get_channel.return_value = channel
+        db.set_setting(bot.db, "patch_notes_id", 1)
+        cog = pn.PatchNotes(bot)
+        counts = []
+        cog.fetch_news = AsyncMock(side_effect=lambda count: counts.append(count) or
+                                   [item("Minor Update - 2", 40), item("Lore", 35), item("Minor Update - 1", 30)])
+        with patch.object(pn, "POST_DELAY", 0):
+            cog.backfill()
+            await asyncio.gather(*cog.tasks)
+            await cog.check()
+        self.assertEqual(posted, ["Minor Update - 1", "Minor Update - 2"])
+        self.assertEqual(counts, [pn.HISTORY, 10])
 
 
 if __name__ == "__main__":

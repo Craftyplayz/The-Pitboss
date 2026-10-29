@@ -64,5 +64,5 @@ The forum post, one per Member, where that Member's Match Recaps are posted. It 
 _Avoid_: Feed, log
 
 **Patch Notes**:
-Valve's changelog for one Deadlock update, taken from Steam. The bot posts each new one in the patch notes channel picked with /setup; long ones continue in a thread under the post.
+Valve's changelog for one Deadlock update, taken from Steam. Picking the patch notes channel with /setup posts every past one there, oldest first, as a log; after that each new one is posted as it comes out. Long ones continue in a thread under the post.
 _Avoid_: Changelog, update post

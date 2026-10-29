@@ -134,9 +134,14 @@ class Link(commands.Cog):
                              "edit the channel's @everyone permissions: Send Messages off, Send Messages in Threads on, "
                              "Create Public Threads off. Then give me Send Messages and Create Public Threads.")
         if patch_notes:
+            moved = db.get_setting(self.bot.db, "patch_notes_id") != str(patch_notes.id)
             db.set_setting(self.bot.db, "patch_notes_id", patch_notes.id)
             perms = patch_notes.permissions_for(me)
-            lines.append(f"New Deadlock patch notes will be posted in {patch_notes.mention}, starting with the next update.")
+            lines.append(f"New Deadlock patch notes will be posted in {patch_notes.mention}.")
+            # same channel again: it already has the log, so don't post it twice
+            if moved and (cog := self.bot.get_cog("PatchNotes")):
+                cog.backfill()
+                lines[-1] += " Posting every past patch there now, oldest first (takes a few minutes)."
             if not (perms.send_messages and perms.embed_links and perms.create_public_threads):
                 lines[-1] += " Warning: give me Send Messages, Embed Links and Create Public Threads there."
         if not lines:
