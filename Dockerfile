@@ -7,6 +7,7 @@ COPY *.py .
 COPY cogs/ cogs/
 COPY core/ core/
 COPY mockups/ mockups/
+COPY pages/ pages/
 COPY assets/ assets/
 
 # unbuffered so logs show up in `docker logs` immediately

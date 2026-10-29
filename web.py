@@ -1,142 +1,134 @@
-"""The Pitboss website: plain HTML pages of the stats the bot posts, for Linked Players only. Run: python web.py"""
-import html
+"""The Pitboss website: a dashboard of Linked Players' stats from deadlock-api.com. Run: python web.py"""
+import asyncio
+import json
 import os
-from datetime import datetime, timezone
+import time
 from pathlib import Path
 
 from aiohttp import web
 
+from core import dashboard as dash
 from core import db
 from core.api import APIError, DeadlockAPI
-from core.match import final_build, find_player, scoreboard, souls_sources
-from core.shared import won
+from core.shared import window_start
 
 PORT = int(os.environ.get("WEB_PORT", 8642))
+ROOT = Path(__file__).parent
+DASHBOARD_TTL = 300  # seconds before the dashboard data is rebuilt from the API
+MATCH_TTL = 86400  # finished matches don't change
+ITEMS_TTL = 6 * 3600
 
 
-def _cell(c):
-    """A table cell: (text, href) becomes a link, anything else is escaped text."""
-    if isinstance(c, tuple):
-        return f'<a href="{html.escape(c[1])}">{html.escape(str(c[0]))}</a>'
-    return html.escape(str(c))
+def render_page(template, data):
+    """Inject the dashboard data into the page. `</` is escaped so no string can close the <script>."""
+    payload = json.dumps(data, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
+    return template.replace("/*DATA*/null", payload, 1)
 
 
-def table(headers, rows):
-    head = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
-    body = "".join("<tr>" + "".join(f"<td>{_cell(c)}</td>" for c in r) + "</tr>" for r in rows)
-    return f"<table border=1 cellpadding=4><tr>{head}</tr>{body}</table>"
+def empty_page(message):
+    return (f"<!doctype html><meta charset=utf-8><title>The Pitboss</title>"
+            f"<body style='font:16px system-ui;background:#0f141b;color:#dbdee1;padding:24px'><p>{message}</p></body>")
 
 
-def page(title, body):
-    return (f"<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'>"
-            f"<title>{html.escape(title)} · The Pitboss</title></head>"
-            f"<body><p><a href='/'>The Pitboss</a></p><h1>{html.escape(title)}</h1>{body}</body></html>")
+async def cached(app, key, ttl, make):
+    # shortcut: unbounded dict and no request coalescing, fine for one server's traffic; use an LRU if it grows
+    hit = app["cache"].get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    value = await make()
+    app["cache"][key] = (time.monotonic() + ttl, value)
+    return value
 
 
-def _date(ts):
-    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-
-def _mmss(s):
-    return f"{s // 60}:{s % 60:02d}"
-
-
-def index_page(links, names):
-    """links: db rows. names: {account_id: personaname}."""
-    rows = [((names.get(l["account_id"], l["account_id"]), f"/player/{l['account_id']}"), l["account_id"], _date(l["linked_at"]))
-            for l in links]
-    return page("Linked Players", table(["Player", "Account ID", "Linked"], rows) if rows else "<p>No one is linked yet.</p>")
-
-
-def player_page(account_id, name, rank_name, history, hero_names):
-    rows = [(_date(m["start_time"]), hero_names.get(m["hero_id"], f"Hero {m['hero_id']}"), "Win" if won(m) else "Loss",
-             f"{m['player_kills']}/{m['player_deaths']}/{m['player_assists']}", f"{m['net_worth']:,}",
-             _mmss(m["match_duration_s"]), (m["match_id"], f"/match/{m['match_id']}/{account_id}"))
-            for m in history]
-    body = f"<p>Account ID {account_id} · Rank: {html.escape(rank_name or 'Unranked')}</p><h2>Recent matches</h2>"
-    body += table(["Date", "Hero", "Result", "K/D/A", "Souls", "Duration", "Match"], rows) if rows else "<p>No matches.</p>"
-    return page(name, body)
-
-
-def match_page(meta, account_id, heroes, items):
-    """None if the Player isn't in this Match."""
-    info = meta["match_info"]
-    me = find_player(meta, account_id)
-    if me is None:
-        return None
-    hero_names = {i: h["name"] for i, h in heroes.items()}
-    s = me["stats"][-1]
-    win = info["winning_team"] == me["team"]
-    minutes = max(info["duration_s"] / 60, 1)
-    shots = s["shots_hit"] + s["shots_missed"]
-    stats = [
-        ("K / D / A", f"{me['kills']} / {me['deaths']} / {me['assists']}"),
-        ("Souls", f"{me['net_worth']:,} ({me['net_worth'] / minutes:,.0f}/min)"),
-        ("Level", me["level"]),
-        ("Hero damage", f"{s['player_damage']:,}"),
-        ("Healing", f"{s['player_healing']:,}"),
-        ("Damage taken", f"{s['player_damage_taken']:,}"),
-        ("Accuracy", f"{s['shots_hit'] / shots:.1%}" if shots else "-"),
-        ("Last hits / denies", f"{me['last_hits']} / {me['denies']}"),
-    ]
-    body = f"<p>{_date(info['start_time'])} · {_mmss(info['duration_s'])} · Match {info['match_id']}</p>"
-    body += "<h2>Stats</h2>" + table(["Stat", "Value"], stats)
-    body += "<h2>Souls by source</h2>" + table(["Source", "Souls"], [(n, f"{v:,}") for n, v in souls_sources(s)])
-    build = final_build(me, items)
-    body += "<h2>Final build</h2>" + table(["Item", "Slot", "Cost"], [(i["name"], i.get("item_slot_type", ""), i.get("cost") or 0) for i in build])
-    for label, team_won, total, rows in scoreboard(info["players"], me, hero_names, win):
-        body += f"<h2>{label} · {'Win' if team_won else 'Loss'} · {total:,} souls</h2>"
-        body += table(["Hero", "K/D/A", "Souls", "Damage", ""], [(h, kda, f"{so:,}", f"{d:,}", "you" if is_me else "")
-                                                                 for h, kda, so, d, is_me in rows])
-    return page(f"{heroes.get(me['hero_id'], {}).get('name', 'Hero')} · {'Win' if win else 'Loss'}", body)
-
-
-def _html(text, status=200):
-    return web.Response(text=text, status=status, content_type="text/html")
-
-
-def _linked(request):
-    """The account_id from the URL if it belongs to a Linked Player, else raise 404."""
+async def _safe(coro, default):
+    """An optional API call: log failures and fall back so one bad endpoint doesn't blank the page."""
     try:
-        account_id = int(request.match_info["account_id"])
-    except ValueError:
-        raise web.HTTPNotFound()
-    if not db.get_link_by_account(request.app["db"], account_id):
-        raise web.HTTPNotFound(text="That Player isn't linked.")
-    return account_id
+        return await coro or default
+    except APIError as e:
+        print(f"web: {e}")
+        return default
+
+
+async def build_dashboard(app):
+    api = app["api"]
+    ids = [l["account_id"] for l in db.all_links(app["db"])]
+    if not ids:
+        return None
+    now, since = int(time.time()), window_start()
+    joined = ",".join(map(str, ids))
+    n = len(ids)
+    results = await asyncio.gather(
+        _safe(api.get("/v1/players/steam", account_ids=joined), []),
+        _safe(api.get("/v1/players/rank", account_ids=joined), []),
+        _safe(api.get("/v1/players/hero-stats", account_ids=joined), []),
+        _safe(api.get("/v1/analytics/hero-stats", min_unix_timestamp=since), []),
+        *[_safe(api.get(f"/v1/players/{a}/match-history"), []) for a in ids],
+        *[_safe(api.get(f"/v1/players/{a}/mate-stats", min_unix_timestamp=since), []) for a in ids],
+        *[_safe(api.get(f"/v1/players/{a}/enemy-stats", min_unix_timestamp=since), []) for a in ids],
+    )
+    steam, rank_rows, hero_stats, hero_rows = results[:4]
+    histories = {a: [m for m in h if m["start_time"] >= since] for a, h in zip(ids, results[4:4 + n])}
+    mates, enemies = dict(zip(ids, results[4 + n:4 + 2 * n])), dict(zip(ids, results[4 + 2 * n:]))
+
+    linked = set(ids)
+    others = {r.get("mate_id") or r.get("enemy_id") for rows in (*mates.values(), *enemies.values()) for r in rows} - linked
+    other_steam = await _safe(api.get("/v1/players/steam", account_ids=",".join(map(str, list(others)[:200]))), []) if others else []
+    profiles = {p["account_id"]: p for p in [*steam, *other_steam]}
+    badges = {r["account_id"]: r.get("badge") or 0 for r in rank_rows}
+
+    players = [dash.player_entry(a, profiles.get(a), badges.get(a, 0), histories[a],
+                                 [r for r in hero_stats if r["account_id"] == a], mates[a], enemies[a], linked, profiles)
+               for a in ids]
+    players = [p for p in players if p]  # shortcut: Linked Players with no match in 30 days are left off the page
+    names = {i: p["personaname"] for i, p in profiles.items() if i not in linked}
+    return dash.dashboard(now, players, histories, await api.heroes(), await api.items(), await api.ranks(), hero_rows, names)
+
+
+async def dashboard_data(app):
+    return await cached(app, "dashboard", DASHBOARD_TTL, lambda: build_dashboard(app))
 
 
 async def index(request):
-    links = db.all_links(request.app["db"])
-    names = {}
-    if links:
-        found = await request.app["api"].get("/v1/players/steam", account_ids=",".join(str(l["account_id"]) for l in links))
-        names = {p["account_id"]: p["personaname"] for p in found or []}
-    return _html(index_page(links, names))
+    data = await dashboard_data(request.app)
+    if not data or not data["P"]:
+        return web.Response(text=empty_page("No Linked Players have played in the last 30 days."), content_type="text/html")
+    return web.Response(text=render_page(request.app["template"], data), content_type="text/html")
 
 
-async def player(request):
-    aid = _linked(request)
+async def match_api(request):
+    match_id = int(request.match_info["match_id"])
+    app = request.app
+    data = await dashboard_data(app)
+    # only matches with a Linked Player, so the site can't be used as an open proxy to the API
+    if not data or match_id not in {m["id"] for m in data["SM"]}:
+        raise web.HTTPNotFound()
+
+    async def make():
+        meta = await app["api"].get(f"/v1/matches/{match_id}/metadata")
+        if not meta:
+            return None
+        ids = ",".join(str(p["account_id"]) for p in meta["match_info"]["players"])
+        names = {p["account_id"]: p["personaname"] for p in await _safe(app["api"].get("/v1/players/steam", account_ids=ids), [])}
+        return dash.match_detail(meta, await app["api"].items(), names)
+
+    detail = await cached(app, f"match:{match_id}", MATCH_TTL, make)
+    if detail is None:
+        app["cache"].pop(f"match:{match_id}", None)  # not processed yet; try again next time
+        raise web.HTTPNotFound()
+    return web.json_response(detail)
+
+
+async def hero_items_api(request):
+    hero_id = int(request.match_info["hero_id"])
     api = request.app["api"]
-    found = await api.get("/v1/players/steam", account_ids=aid)
-    rank = await api.get(f"/v1/players/{aid}/rank")
-    history = await api.get(f"/v1/players/{aid}/match-history") or []
-    badge = (rank or {}).get("badge") or 0
-    rank_asset = (await api.ranks()).get(badge // 10) if badge else None
-    rank_name = f"{rank_asset['name']} {badge % 10}" if rank_asset else None
-    hero_names = {i: h["name"] for i, h in (await api.heroes()).items()}
-    name = found[0]["personaname"] if found else str(aid)
-    return _html(player_page(aid, name, rank_name, history[:20], hero_names))
+    if hero_id not in await api.heroes():
+        raise web.HTTPNotFound()
 
+    async def make():
+        rows = await api.get("/v1/analytics/item-stats", hero_id=hero_id, min_unix_timestamp=int(time.time()) - 14 * 86400)
+        return dash.hero_items(rows or [], await api.items())
 
-async def match(request):
-    aid = _linked(request)
-    api = request.app["api"]
-    meta = await api.get(f"/v1/matches/{int(request.match_info['match_id'])}/metadata")
-    text = match_page(meta, aid, await api.heroes(), await api.items()) if meta else None
-    if text is None:
-        raise web.HTTPNotFound(text="No data for that Player in that Match yet.")
-    return _html(text)
+    return web.json_response(await cached(request.app, f"items:{hero_id}", ITEMS_TTL, make))
 
 
 async def mockups_index(request):
@@ -148,13 +140,15 @@ async def api_errors(request, handler):
     try:
         return await handler(request)
     except APIError as e:
-        return _html(page("Stats unavailable", f"<p>{html.escape(str(e))}</p>"), status=502)
+        return web.Response(text=empty_page(f"Stats unavailable: {e}"), status=502, content_type="text/html")
 
 
 def make_app():
     app = web.Application(middlewares=[api_errors])
     app["db"] = db.connect(os.environ.get("DB_PATH", "data/pitboss.db"))
     app["api"] = DeadlockAPI(os.environ.get("DEADLOCK_API_KEY") or None)
+    app["template"] = (ROOT / "pages" / "dashboard.html").read_text(encoding="utf8")
+    app["cache"] = {}
 
     async def start(app):
         await app["api"].start()
@@ -164,10 +158,11 @@ def make_app():
 
     app.on_startup.append(start)
     app.on_cleanup.append(stop)
-    app.add_routes([web.get("/", index), web.get("/player/{account_id}", player),
-                    web.get("/match/{match_id:\\d+}/{account_id}", match),
+    app.add_routes([web.get("/", index),
+                    web.get("/api/match/{match_id:\\d+}", match_api),
+                    web.get("/api/hero-items/{hero_id:\\d+}", hero_items_api),
                     web.get("/mockups", mockups_index),
-                    web.static("/mockups", Path(__file__).parent / "mockups")])
+                    web.static("/mockups", ROOT / "mockups")])
     return app
 
 
