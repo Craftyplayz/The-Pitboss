@@ -18,6 +18,8 @@ services:
     environment:
       DEADLOCK_API_KEY: ${DEADLOCK_API_KEY:-}
       WEB_PORT: 8642
+      # password for /admin (the API call log viewer); leave empty to turn the page off
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     # put a reverse proxy (with HTTPS) for deadlock.craftyplayz.com in front of this port
     ports:
       - "8642:8642"

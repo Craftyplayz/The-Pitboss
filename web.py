@@ -7,6 +7,8 @@ from pathlib import Path
 
 from aiohttp import web
 
+import admin
+
 from core import dashboard as dash
 from core import db
 from core.api import APIError, DeadlockAPI
@@ -154,6 +156,8 @@ def make_app():
     app["db"] = db.connect(db_path)
     # every API call, forever, one JSON line each; next to the database so it lives on the data volume
     app["api"] = DeadlockAPI(os.environ.get("DEADLOCK_API_KEY") or None, log_path=Path(db_path).parent / "api-web.jsonl")
+    app["log_dir"] = Path(db_path).parent  # both services' API call logs, read by /admin
+    app["admin_password"] = os.environ.get("ADMIN_PASSWORD", "")
     app["template"] = (ROOT / "pages" / "dashboard.html").read_text(encoding="utf8")
     app["cache"] = {}
 
@@ -166,6 +170,7 @@ def make_app():
     app.on_startup.append(start)
     app.on_cleanup.append(stop)
     app.add_routes([web.get("/", index),
+                    web.get("/admin", admin.admin),
                     web.get("/api/match/{match_id:\\d+}", match_api),
                     web.get("/api/hero-items/{hero_id:\\d+}", hero_items_api),
                     web.static("/static", ROOT / "static"),
