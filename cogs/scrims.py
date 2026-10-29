@@ -1,4 +1,4 @@
-"""Scrims: /scrim opens a sign-up channel, the creator makes teams, the bot makes a deadlock-api custom lobby,
+"""Scrims: /scrim opens a category with a sign-up channel and a voice channel per team, the creator makes teams, the bot makes a deadlock-api custom lobby,
 then saves the Match's scoreboard once it is over and posts it to the scrim log channel."""
 import html
 import json
@@ -108,6 +108,21 @@ def signup(scrim, players):
     return embed, view
 
 
+def category_name(scrim_id):
+    return f"Scrim #{scrim_id}"
+
+
+async def delete_scrim_channels(channel, scrim_id):
+    """Delete the scrim's sign-up channel, and its whole category if the bot made one for this scrim.
+    Scrims from before categories sit in a shared category, so the name check keeps that one safe."""
+    category = channel.category
+    if not category or category.name != category_name(scrim_id):
+        return await channel.delete(reason="Scrim cancelled")
+    for c in category.channels:
+        await c.delete(reason="Scrim cancelled")
+    await category.delete(reason="Scrim cancelled")
+
+
 def short(n):
     return f"{n / 1000:.1f}K" if n >= 1000 else str(n)
 
@@ -186,7 +201,7 @@ class Scrims(commands.Cog):
     async def cog_unload(self):
         self.watch.cancel()
 
-    @app_commands.command(name="scrim", description="Start a scrim: opens a sign-up channel with a Join button.")
+    @app_commands.command(name="scrim", description="Start a scrim: opens sign-up and team voice channels.")
     @app_commands.guild_only()
     async def scrim(self, interaction: discord.Interaction):
         if await self.needs_link(interaction):  # the creator joins their own scrim
@@ -195,18 +210,25 @@ class Scrims(commands.Cog):
         now = int(time.time())
         sid = db.create_scrim(self.bot.db, interaction.user.id, now)
         db.add_scrim_player(self.bot.db, sid, interaction.user.id, now)
-        channel = None
+        made, reason = [], f"Scrim by {interaction.user}"
         try:
-            channel = await interaction.guild.create_text_channel(
-                f"scrim-{sid}", category=getattr(interaction.channel, "category", None), reason=f"Scrim by {interaction.user}")
+            category = await interaction.guild.create_category(category_name(sid), reason=reason)
+            made.append(category)
+            if anchor := getattr(interaction.channel, "category", None):
+                # new categories land at the bottom; put this one right under /scrim's, so the newest scrim is on top
+                await category.move(after=anchor, reason=reason)
+            channel = await category.create_text_channel(f"scrim-{sid}", reason=reason)
+            made.append(channel)
+            for t, name in enumerate(TEAMS):
+                made.append(await category.create_voice_channel(f"{SQUARES[t]} {name}", reason=reason))
             msg = await channel.send(**self.render(sid))
         except discord.HTTPException as e:
             print(f"scrims: couldn't open scrim {sid}: {e}")
             db.update_scrim(self.bot.db, sid, state="cancelled")
-            if channel:
-                await channel.delete()
+            for c in reversed(made):
+                await c.delete()
             return await interaction.followup.send(
-                "I couldn't make the scrim channel. Give me the Manage Channels permission.", ephemeral=True)
+                "I couldn't make the scrim channels. Give me the Manage Channels permission.", ephemeral=True)
         db.update_scrim(self.bot.db, sid, channel_id=channel.id, message_id=msg.id)
         await interaction.followup.send(f"Scrim #{sid} is open: join in {channel.mention}.")
 
@@ -328,9 +350,9 @@ class Scrims(commands.Cog):
         if scrim["state"] not in ("open", "picking", "lobby"):
             return await self.reject(interaction, "This scrim can't be cancelled now.")
         db.update_scrim(self.bot.db, scrim["id"], state="cancelled")
-        await interaction.response.send_message("Scrim cancelled. This channel will be deleted.", ephemeral=True)
+        await interaction.response.send_message("Scrim cancelled. Its channels will be deleted.", ephemeral=True)
         try:
-            await interaction.channel.delete(reason="Scrim cancelled")
+            await delete_scrim_channels(interaction.channel, scrim["id"])
         except discord.HTTPException:
             await self.refresh(scrim["id"])
 

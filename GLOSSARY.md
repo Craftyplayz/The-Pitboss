@@ -56,7 +56,7 @@ A message the bot posts on its own after a Linked Member finishes a Match. On li
 _Avoid_: Notification, alert, match post
 
 **Scrim**:
-A custom Match between Members, set up with /scrim: Members sign up in its own channel, get split into two teams and play in a custom lobby the bot makes. Its scoreboard is saved once the Match is over.
+A custom Match between Members, set up with /scrim: Members sign up in its own category (a sign-up channel plus a voice channel per team), get split into two teams and play in a custom lobby the bot makes. Its scoreboard is saved once the Match is over.
 _Avoid_: Custom game, inhouse, private match
 
 **Recap Thread**:

@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 from cogs.scrims import Scrims as ScrimsCog
-from cogs.scrims import TEAM_SIZE, link_guide, random_teams, result_embed, signup
+from cogs.scrims import TEAM_SIZE, delete_scrim_channels, link_guide, random_teams, result_embed, signup
 from core import db
 from core.dashboard import match_detail
 from tests.test_recap_embed import ITEMS, META
@@ -32,6 +32,21 @@ class Scrims(unittest.IsolatedAsyncioTestCase):  # discord.ui.View needs a runni
         self.assertEqual(db.scrim_players(self.conn, self.sid), [(1, None), (2, 1)])
         db.set_scrim_teams(self.conn, self.sid, {1: 0})
         self.assertEqual(db.scrim_players(self.conn, self.sid), [(1, 0), (2, 1)])
+
+    async def test_cancel_deletes_only_the_scrims_own_category(self):
+        signup_channel, voice = AsyncMock(), AsyncMock()
+        signup_channel.category = category = AsyncMock(channels=[signup_channel, voice])
+        category.name = "Scrim #7"
+        await delete_scrim_channels(signup_channel, 7)
+        for c in (signup_channel, voice, category):
+            c.delete.assert_awaited_once()
+
+        old = AsyncMock()  # a scrim from before categories, inside the server's own category
+        old.category = shared = AsyncMock()
+        shared.name = "deadlock"
+        await delete_scrim_channels(old, 7)
+        old.delete.assert_awaited_once()
+        shared.delete.assert_not_awaited()
 
     async def test_signup_buttons_follow_state(self):
         ids = lambda view: [i.custom_id.split(":")[1] for i in view.children if not i.disabled]
