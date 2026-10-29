@@ -2,6 +2,7 @@
 import html
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from aiohttp import web
 
@@ -138,6 +139,10 @@ async def match(request):
     return _html(text)
 
 
+async def mockups_index(request):
+    raise web.HTTPFound("/mockups/index.html")
+
+
 @web.middleware
 async def api_errors(request, handler):
     try:
@@ -160,7 +165,9 @@ def make_app():
     app.on_startup.append(start)
     app.on_cleanup.append(stop)
     app.add_routes([web.get("/", index), web.get("/player/{account_id}", player),
-                    web.get("/match/{match_id:\\d+}/{account_id}", match)])
+                    web.get("/match/{match_id:\\d+}/{account_id}", match),
+                    web.get("/mockups", mockups_index),
+                    web.static("/mockups", Path(__file__).parent / "mockups")])
     return app
 
 
