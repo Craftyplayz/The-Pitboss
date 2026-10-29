@@ -130,7 +130,7 @@ class PatchNotes(commands.Cog):
         if len(embeds) == 1:
             return
         # the rest goes in a thread so a big patch doesn't bury the channel
-        thread = await msg.create_thread(name=item["title"][:100])
+        thread = await msg.create_thread(name=item["title"][:100], auto_archive_duration=10080)
         for e in embeds[1:]:
             await thread.send(embed=e)
         await thread.send(view=link_view(item))
