@@ -2,6 +2,12 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+## 1.5.0
+
+- New **Trophies** tab on the website: every trophy and tier, with how many players have reached each one and the %.
+- The top of the tab shows who holds the most trophies (every tier counts, so tier 6 is 6 trophies) and their rarest ones.
+- Filter by category, or sort rarest first. The Heroes filter shows Jack of All Trades and One-Trick, then each hero's mastery, most played first.
+
 ## 1.4.1.2
 
 - Test update to check that bot update posts work.

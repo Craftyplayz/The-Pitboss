@@ -56,6 +56,20 @@ tr.click{cursor:pointer}
 .tc{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;flex:none;color:var(--c);background:color-mix(in srgb,var(--c) 22%,transparent);border:2px solid var(--c);box-sizing:border-box;overflow:hidden}
 .tc svg{width:60%;height:60%}.tc img{width:100%;height:100%;object-fit:cover}
 .tc.off{filter:grayscale(1);opacity:.3}
+.tfx{flex-direction:row;align-items:center;gap:14px;flex-wrap:wrap;border-color:#f0c35a55;background:linear-gradient(90deg,#f0c35a14,var(--card) 70%);margin-bottom:16px;color:inherit;text-decoration:none}
+.tfx .l{color:var(--gold);font-size:11px;text-transform:uppercase;letter-spacing:.1em}.tfx .t{min-width:150px}.tfx .t b{font-size:16px}
+.tfx .rr{display:flex;gap:18px;flex-wrap:wrap;flex:1}.tfx .rr>div{display:flex;gap:8px;align-items:center;font-size:13px}.tfx .rr .mu{font-size:11px}
+.tfx .n{font:600 30px Inter;color:var(--gold);margin-left:auto;text-align:right;line-height:1}.tfx .n small{display:block;font:400 11px Inter;color:var(--mu)}
+.tfb{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px}.tfb>div{display:flex;gap:6px;flex-wrap:wrap}.tfb .sg{margin-left:auto}
+.tfb button{background:var(--card);border:1px solid var(--line);color:var(--mu);font:500 12px Inter;padding:6px 12px;border-radius:99px;cursor:pointer}
+.tfb button:hover{color:var(--tx)}.tfb button.on{background:#1c2430;color:var(--gold);border-color:#f0c35a55}
+.tfg{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.tfh{display:flex;align-items:center;gap:12px;margin-bottom:12px}.tfh .tc{--c:var(--gold);width:44px;height:44px}.tfh b{display:block;font-size:15px}
+.tcat{font-size:10px;color:var(--mu);border:1px solid var(--line);border-radius:99px;padding:1px 7px;text-transform:uppercase;letter-spacing:.07em}
+.tfr{position:relative;display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;overflow:hidden;margin-bottom:2px}
+.tfr:before{content:"";position:absolute;inset:0 auto 0 0;width:var(--p);background:color-mix(in srgb,var(--c) 16%,transparent)}.tfr>*{position:relative}
+.tfr .nm{flex:1;min-width:0;line-height:1.25}.tfr .nm b{display:block;font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tfr .nm span{font-size:11px;color:var(--mu)}
+.tfr .r{font-size:12px;color:var(--mu);white-space:nowrap}.tfr .r b{color:var(--tx)}.tfr.z .r{opacity:.55}.tfr.z .tc{filter:grayscale(1);opacity:.35}
 .dots{display:flex;gap:3px}.dots i{width:10px;height:10px;border-radius:3px;background:var(--loss);flex:none}.dots i.w{background:var(--win)}
 .dots.wd{gap:4px;justify-content:center}.dots.wd i{flex:0 1 24px;width:auto;height:16px}
 .tm{font:600 13px Inter;margin-bottom:8px;display:flex;gap:10px;align-items:center}
@@ -120,14 +134,14 @@ a.row{color:inherit;text-decoration:none}a.row:hover{background:#1a222d}
 <nav id="side"><div class="logo">THE PITBOSS</div><div id="nav"></div>
 <div class="srv"><b id="srvn"></b>Data: deadlock-api.com<br>Last 30 days</div></nav>
 <main>
-<section class="v" id="v-overview"></section><section class="v" id="v-leaderboards"></section><section class="v" id="v-players"></section><section class="v" id="v-matches"></section><section class="v" id="v-heroes"></section><section class="v" id="v-scrims"></section>
+<section class="v" id="v-overview"></section><section class="v" id="v-leaderboards"></section><section class="v" id="v-players"></section><section class="v" id="v-matches"></section><section class="v" id="v-heroes"></section><section class="v" id="v-scrims"></section><section class="v" id="v-trophies"></section>
 </main>
 <dialog id="itd" onclick="if(event.target===this)this.close()"></dialog>
 <script>
 const D=/*DATA*/null;
 const $=s=>document.getElementById(s),P=D.P,AP=P.filter(p=>p.n),byId=Object.fromEntries(P.map(p=>[p.id,p]));
-const IC={overview:'<path d="M3 11l9-8 9 8M5 10v10h14V10"/>',leaderboards:'<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3"/>',players:'<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-4 3-6 7-6s7 2 7 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.5.7 4 2.5 4 6"/>',matches:'<path d="M4 6h16M4 12h16M4 18h10"/>',heroes:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',scrims:'<path d="M3 3l11 11M3 7V3h4M21 3L10 14M21 7V3h-4M6 15l3 3M15 18l3-3M4 20l3-3M20 20l-3-3"/>'};
-const TABS=['overview','leaderboards','players','matches','heroes','scrims'];
+const IC={overview:'<path d="M3 11l9-8 9 8M5 10v10h14V10"/>',leaderboards:'<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3"/>',players:'<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-4 3-6 7-6s7 2 7 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14c2.5.7 4 2.5 4 6"/>',matches:'<path d="M4 6h16M4 12h16M4 18h10"/>',heroes:'<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',scrims:'<path d="M3 3l11 11M3 7V3h4M21 3L10 14M21 7V3h-4M6 15l3 3M15 18l3-3M4 20l3-3M20 20l-3-3"/>',trophies:'<circle cx="12" cy="15" r="6"/><path d="M8.5 10.5L6 3h4l2 4 2-4h4l-2.5 7.5M12 12.5v5"/>'};
+const TABS=['overview','leaderboards','players','matches','heroes','scrims','trophies'];
 $('nav').innerHTML=TABS.map(t=>`<button class="nav" data-t="${t}"><svg viewBox="0 0 24 24">${IC[t]}</svg>${t[0].toUpperCase()+t.slice(1)}</button>`).join('');
 $('nav').onclick=e=>{const b=e.target.closest('.nav');if(b){location.hash=b.dataset.t;side.classList.remove('open')}};
 const f=n=>Math.round(n).toLocaleString('en-US'),pc=(w,n)=>n?Math.round(100*w/n):0,kda=p=>((p.k+p.a)/Math.max(1,p.d)).toFixed(2),kd=(k,d,a)=>((k+a)/Math.max(1,d)).toFixed(2);
@@ -342,8 +356,26 @@ function scrims(a,b){const SC=D.SC||[],sel=SC.find(s=>s.sid==a)||SC[0];
  if(!sel){split('scrims','Scrims','No scrims yet','','<div class="card s12"><p class="mu">No scrims recorded yet. Run /scrim in Discord to start one.</p></div>',!!a);return}
  const row=s=>`<a class="li ${s===sel?'sel':''}" href="#scrims/${s.sid}"><div class="r1"><b>#${s.sid}</b><span class="nm" style="display:flex;gap:4px">${s.pl.slice(0,6).map(x=>hi(x.hero,'hi hs')).join('')}</span><span class="mu">${dt(s.t)}</span></div><div class="r2"><span class="${s.win?'sa':'am'}" style="width:90px">${TN[s.win]} win</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.pl.map(x=>x.nm).join(', ')}</span><span>${mm(s.dur)}</span></div></a>`;
  split('scrims','Scrims',`${SC.length} recorded`,`<div class="sec">All scrims</div>${SC.map(row).join('')}`,full(sel,b,'scrims/'+sel.sid),!!a)}
+/* ---------- TROPHIES ---------- */
+let TFC='All',TFS='cat';  // category filter and sort, kept while the page is open
+function trophies(){const N=P.length,W={},plays={},cats=['Combat','Kill style','Economy','Results','Items','Heroes','Single match'];
+ P.forEach(p=>{(p.tr||[]).forEach(([k,t])=>(W[k+':'+t]=W[k+':'+t]||[]).push(p.name));Object.entries(p.tp||{}).forEach(([k,v])=>{if(!D.TF[k])plays[k]=(plays[k]||0)+v})});
+ // heroes come after Jack of All Trades and One-Trick, most played on the server first; the sort below is stable
+ const keys=[...Object.keys(D.TF),...Object.keys(plays).sort((x,y)=>plays[y]-plays[x])].filter(k=>TFC==='All'||fam(k).cat===TFC);
+ const best=k=>{for(let t=fam(k).tiers.length-1;t>=0;t--)if(W[k+':'+t])return rar(k,t);return 999};
+ keys.sort(TFS==='rare'?(x,y)=>best(x)-best(y):(x,y)=>cats.indexOf(fam(x).cat)-cats.indexOf(fam(y).cat));
+ const card=k=>{const F=fam(k);return `<div class="card"><div class="tfh"><span class="tc">${ico(k)}</span><div style="min-width:0"><b>${F.label}</b><span class="tcat">${F.h?f(plays[k])+' games on the server':F.cat}</span></div></div>
+  ${F.tiers.map((n,t)=>{const w=W[k+':'+t]||[],c=Math.round(100*w.length/N);return `<div class="tfr${w.length?'':' z'}" style="--c:${TC[t]};--p:${c}%" title="${w.join(', ')||'Nobody yet'}"><span class="tc">${ico(k)}</span><div class="nm"><b>${F.h?D.TM[0][t]:n}</b><span>${F.low?'≤ ':''}${fv(F.th[t],F.unit)}</span></div><div class="r"><b>${w.length} of ${N}</b> · ${c}%</div></div>`}).join('')}</div>`};
+ // every tier earned is one trophy, so tier 6 of a family counts as 6
+ const top=[...P].sort((x,y)=>(y.tr||[]).length-(x.tr||[]).length)[0],tt=top.tr||[],rare=[...tt].sort((x,y)=>rar(x[0],x[1])-rar(y[0],y[1])||y[1]-x[1]).slice(0,3);
+ const btn=(on,js,l)=>`<button class="${on?'on':''}" onclick="${js};trophies()">${l}</button>`;
+ $('v-trophies').innerHTML=`<div class="ov"><div class="in"><div class="ph1"><div><h1>Trophies</h1><p>${Object.keys(D.TF).length} trophies and ${Object.keys(plays).length} hero masteries · ${N} linked players · every match counts · hover a tier to see who has it</p></div></div>
+ <a class="card tfx" href="#players/${top.id}/trophies">${av(top.av,top.name,'av','width:48px;height:48px')}<div class="t"><div class="l">Most trophies held</div><b>${top.name}</b><div class="mu" style="font-size:12px">Their rarest:</div></div>
+ <div class="rr">${rare.map(([k,t])=>`<div>${tchip(k,t)}<div><b>${fam(k).tiers[t]}</b><div class="mu">${fam(k).label} · ${rar(k,t)}% of players</div></div></div>`).join('')}</div><div class="n">${tt.length}<small>trophies</small></div></a>
+ <div class="tfb"><div>${['All',...cats].map(c=>btn(c===TFC,`TFC='${c}'`,c)).join('')}</div><div class="sg">${btn(TFS==='cat',"TFS='cat'",'Category')}${btn(TFS==='rare',"TFS='rare'",'Rarest first')}</div></div>
+ <div class="tfg">${keys.map(card).join('')}</div></div></div>`}
 /* ---------- router ---------- */
-const V={overview,leaderboards,players,matches,heroes,scrims};
+const V={overview,leaderboards,players,matches,heroes,scrims,trophies};
 function route(){const [t0,a,b]=(location.hash.slice(1)||'overview').split('/'),t=V[t0]?t0:'overview';
  document.querySelectorAll('.v').forEach(v=>v.classList.remove('on'));$('v-'+t).classList.add('on');
  document.querySelectorAll('.nav').forEach(x=>x.classList.toggle('on',x.dataset.t===t));
