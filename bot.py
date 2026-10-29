@@ -20,7 +20,7 @@ ABOUT = f"Watching your Deadlock matches.\n\nFull stats: {SITE_URL}\nRun /help f
 class Pitboss(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=commands.when_mentioned, intents=intents,
-                         activity=discord.Activity(type=discord.ActivityType.watching, name="matches · /help"))
+                         activity=discord.CustomActivity(name="always watching · /help"))
         db_path = os.environ.get("DB_PATH", "data/pitboss.db")
         self.db = db.connect(db_path)
         # every API call, forever, one JSON line each; next to the database so it lives on the data volume
