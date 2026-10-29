@@ -1,5 +1,14 @@
 services:
   bot:
     build: .
-    env_file: .env
+    # values come from .env (docker compose) or the stack's environment variables (Portainer)
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      GUILD_ID: ${GUILD_ID}
+      DEADLOCK_API_KEY: ${DEADLOCK_API_KEY:-}
     restart: unless-stopped
+    volumes:
+      - pitboss-data:/app/data
+
+volumes:
+  pitboss-data:

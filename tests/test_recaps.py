@@ -1,0 +1,100 @@
+import sys
+import types
+import unittest
+from unittest.mock import MagicMock
+
+try:
+    import cogs._insights  # noqa: F401
+except ImportError:  # written by another agent; stub so this module imports
+    sys.modules["cogs._insights"] = types.SimpleNamespace(match_insights=lambda m, h, n: ["insight"])
+
+from cogs.recaps import MAX_AGE, build_embed, due_matches
+
+NOW = 1_800_000_000
+LINKED = NOW - 3 * 86400
+
+
+def m(match_id, ended_ago, duration=1800, **kw):
+    return {"match_id": match_id, "start_time": NOW - ended_ago - duration, "match_duration_s": duration, **kw}
+
+
+def ids(recap):
+    return [x["match_id"] for x in recap]
+
+
+class DueMatches(unittest.TestCase):
+    def test_empty(self):
+        self.assertEqual(due_matches([], LINKED, None, NOW), ([], None))
+
+    def test_oldest_first(self):
+        recap, skip = due_matches([m(3, 100), m(1, 3000), m(2, 2000)], LINKED, None, NOW)
+        self.assertEqual(ids(recap), [1, 2, 3])
+        self.assertIsNone(skip)
+
+    def test_only_after_link(self):
+        linked = NOW - 1000
+        recap, skip = due_matches([m(1, 2000), m(2, 500), m(3, 1000)], linked, None, NOW)
+        self.assertEqual(ids(recap), [2])  # ending exactly at linked_at is not after it
+        self.assertIsNone(skip)
+
+    def test_started_before_link_but_ended_after(self):
+        linked = NOW - 1000
+        self.assertEqual(ids(due_matches([m(1, 500, duration=1800)], linked, None, NOW)[0]), [1])
+
+    def test_only_newer_than_last(self):
+        recap, _ = due_matches([m(1, 300), m(2, 200), m(3, 100)], LINKED, 2, NOW)
+        self.assertEqual(ids(recap), [3])
+
+    def test_nothing_new(self):
+        self.assertEqual(due_matches([m(1, 300), m(2, 200)], LINKED, 2, NOW), ([], None))
+
+    def test_too_old_skipped_but_advances(self):
+        linked = NOW - 5 * 86400
+        history = [m(1, 3 * 86400), m(2, 2 * 86400), m(3, MAX_AGE - 1), m(4, 60)]
+        recap, skip = due_matches(history, linked, None, NOW)
+        self.assertEqual(ids(recap), [3, 4])
+        self.assertEqual(skip, 2)
+
+    def test_all_too_old(self):
+        linked = NOW - 5 * 86400
+        recap, skip = due_matches([m(1, 3 * 86400), m(2, 2 * 86400)], linked, None, NOW)
+        self.assertEqual((recap, skip), ([], 2))
+
+    def test_too_old_below_last_not_reported(self):
+        linked = NOW - 5 * 86400
+        self.assertEqual(due_matches([m(1, 2 * 86400)], linked, 1, NOW), ([], None))
+
+    def test_before_link_does_not_advance(self):
+        self.assertEqual(due_matches([m(1, 4 * 86400)], LINKED, None, NOW), ([], None))
+
+    def test_exactly_max_age_still_posted(self):
+        self.assertEqual(ids(due_matches([m(1, MAX_AGE)], LINKED, None, NOW)[0]), [1])
+
+
+class Embed(unittest.TestCase):
+    def test_fields(self):
+        match = m(9, 60, duration=1500, hero_id=1, player_team=0, match_result=0, player_kills=5,
+                  player_deaths=2, player_assists=7, net_worth=30000, ranked_delta=-300)
+        member = MagicMock(display_name="Bob")
+        member.display_avatar.url = "https://example.com/a.png"
+        e = build_embed(match, [match], {1: "Infernus"}, member)
+        self.assertEqual(e.title, "Infernus - Win")
+        fields = {f.name: f.value for f in e.fields}
+        self.assertEqual(fields["K/D/A"], "5/2/7")
+        self.assertEqual(fields["Souls"], "30,000")
+        self.assertEqual(fields["Souls/min"], "1,200")
+        self.assertEqual(fields["Duration"], "25:00")
+        self.assertEqual(fields["Rank change"], "-300")
+
+    def test_no_rank_change_when_zero(self):
+        match = m(9, 60, hero_id=99, player_team=1, match_result=0, player_kills=0, player_deaths=0,
+                  player_assists=0, net_worth=0, ranked_delta=0)
+        member = MagicMock(display_name="Bob")
+        member.display_avatar.url = "https://example.com/a.png"
+        e = build_embed(match, [match], {}, member)
+        self.assertEqual(e.title, "Hero 99 - Loss")
+        self.assertNotIn("Rank change", [f.name for f in e.fields])
+
+
+if __name__ == "__main__":
+    unittest.main()

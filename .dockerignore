@@ -1,1 +1,5 @@
 .env
+.git
+data/
+tests/
+__pycache__/
