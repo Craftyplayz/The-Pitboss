@@ -53,7 +53,8 @@ tr.click{cursor:pointer}
 .pw{background:#4fc98a22;color:var(--win)}.pl{background:#e5636d22;color:var(--loss)}
 .bar{height:6px;background:#222c3a;border-radius:3px;overflow:hidden;min-width:60px;flex:1}
 .bar i{display:block;height:100%;background:var(--gold)}
-.tc{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;flex:none;font-size:14px;background:color-mix(in srgb,var(--c) 22%,transparent);border:2px solid var(--c)}
+.tc{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;flex:none;color:var(--c);background:color-mix(in srgb,var(--c) 22%,transparent);border:2px solid var(--c);box-sizing:border-box;overflow:hidden}
+.tc svg{width:60%;height:60%}.tc img{width:100%;height:100%;object-fit:cover}
 .tc.off{filter:grayscale(1);opacity:.3}
 .dots{display:flex;gap:3px}.dots i{width:10px;height:10px;border-radius:3px;background:var(--loss);flex:none}.dots i.w{background:var(--win)}
 .dots.wd{gap:4px;justify-content:center}.dots.wd i{flex:0 1 24px;width:auto;height:16px}
@@ -196,7 +197,40 @@ const TC=['#cd7f32','#c0c7d0','#F0C35A','#7fd6d0','#6ab8ff','#b078e8','#ff6b6b']
 // family: {cat,label,unit,tiers,th,low}; hero mastery keys are "h<hero id>" and use D.TM
 const fam=k=>{const x=D.TF[k];if(x)return {cat:x[0],label:x[1],unit:x[2],tiers:x[3],th:x[4],low:x[5],link:x[6]};const h=+k.slice(1);return {cat:'Heroes',label:hn(h)+' mastery',unit:' games',tiers:D.TM[0].map(t=>hn(h)+' '+t),th:D.TM[1],low:0,h}};
 const rar=(k,t)=>D.TR[k+':'+t]||0;
-const tchip=(k,t)=>`<span class="tc" style="--c:${TC[t]}" title="${fam(k).tiers[t]}">🏆</span>`;
+// one line icon per trophy family (24px grid, stroked in the tier colour); hero mastery shows the hero's portrait
+const TI={kills:'<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
+ deaths:'<path d="M12 3a7 7 0 0 0-7 7c0 2.6 1.4 4.3 3 5.2V19h8v-3.8c1.6-.9 3-2.6 3-5.2a7 7 0 0 0-7-7z"/><circle cx="9.5" cy="11" r="1.3"/><circle cx="14.5" cy="11" r="1.3"/><path d="M11 19v2M13 19v2"/>',
+ assists:'<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M15.5 14.2c3 .2 5.5 2.3 5.5 5.3"/>',
+ dmg:'<path d="M12 2l2 6 6-2-4 5 5 3-6 1 1 6-4-4-4 4 1-6-6-1 5-3-4-5 6 2z"/>',
+ taken:'<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M12 3l-1.5 6 3 3-2 5"/>',
+ heal:'<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/><path d="M12 9.5v5M9.5 12h5"/>',
+ head:'<circle cx="12" cy="9" r="5"/><path d="M5 21c0-4 3-6 7-6s7 2 7 6"/><circle cx="12" cy="9" r="1.2" fill="currentColor"/>',
+ melee:'<path d="M8.5 13V6a1.5 1.5 0 0 1 3 0v5M11.5 5a1.5 1.5 0 0 1 3 0v6M14.5 6a1.5 1.5 0 0 1 3 0v6M8.5 10.5a1.5 1.5 0 0 0-3 0V14a7 7 0 0 0 7 7h.5a5 5 0 0 0 4.5-5v-4"/>',
+ abil:'<path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z"/><path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/>',
+ souls:'<path d="M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z"/><path d="M12 11c1.8 1.6 2 3.4 0 5"/>',
+ matches:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12l9 5 9-5M3 16l9 5 9-5"/>',
+ hours:'<path d="M6 3h12M6 21h12M7.5 3v3.5L12 12l-4.5 5.5V21M16.5 3v3.5L12 12l4.5 5.5V21"/>',
+ wins:'<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 20h8"/>',
+ losses:'<path d="M6.5 21V4M6.5 4h11l-2 4 2 4h-11"/>',
+ winstreak:'<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2.5 1.5-4 2.5-5 .3 1.6 1.2 2.5 2.5 2.5C12 8 11 6 12 3z"/>',
+ losestreak:'<path d="M7 15a4 4 0 0 1 .5-8 5 5 0 0 1 9.5 1.5A3.5 3.5 0 0 1 17 15z"/><path d="M9 18l-1 2.5M13 18l-1 2.5M17 18l-1 2.5"/>',
+ grind:'<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M9 14.5l2 2 4-4"/>',
+ mvp:'<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/>',
+ weapon:'<path d="M9 21V10c0-4 3-7 3-7s3 3 3 7v11z"/><path d="M9 16h6"/>',
+ vitality:'<path d="M2 12h4.5l2-5 4 10 2-5H22"/>',
+ spirit:'<circle cx="12" cy="12" r="8"/><path d="M12 4a4 4 0 0 1 0 8 4 4 0 0 0 0 8"/>',
+ collector:'<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
+ jack:'<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+ onetrick:'<circle cx="12" cy="12" r="8"/><path d="M10.5 9.5l2-1.5V16M10 16h5"/>',
+ spm:'<path d="M15 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z"/><path d="M15 11c1.8 1.6 2 3.4 0 5M2.5 9h4.5M2 13h5M3 17h4.5"/>',
+ length:'<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M10 2h4"/>',
+ multi:'<path d="M6 5l6 4 6-4M6 11l6 4 6-4M6 17l6 4 6-4"/>',
+ untouchable:'<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
+ feeder:'<path d="M7 3v18M5 3v5a2 2 0 0 0 4 0V3M17 21V3c-2.2 0-3.5 3-3.5 6.5S15 13 17 13"/>',
+ stomp:'<path d="M4.5 6l8 6-8 6zM13.5 6l8 6-8 6z"/>',
+ acc:'<circle cx="11" cy="13" r="7"/><circle cx="11" cy="13" r="3"/><path d="M11 13l8.5-8.5M15.5 4.5h4v4"/>'};
+const ico=k=>TI[k]?`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TI[k]}</svg>`:D.H[k.slice(1)]?`<img src="${D.H[k.slice(1)][1]}" alt="">`:'';
+const tchip=(k,t)=>`<span class="tc" style="--c:${TC[t]}" title="${fam(k).tiers[t]}">${ico(k)}</span>`;
 const fv=(v,u)=>v==null||v<0?'—':(Number.isInteger(v)?f(v):v.toFixed(1))+u;
 function trophyCards(p){const T=p.tr||[],rec=[...T].sort((x,y)=>y[2]-x[2]).slice(0,3),rare=[...T].sort((x,y)=>rar(x[0],x[1])-rar(y[0],y[1])||y[1]-x[1]).slice(0,3);
  const row=([k,t,when],side)=>`<a class="row" href="#players/${p.id}/trophies">${tchip(k,t)}<div style="flex:1;min-width:0"><b>${fam(k).tiers[t]}</b><div class="mu" style="font-size:12px">${fam(k).label}</div></div><span class="mu sp">${side}</span></a>`;
@@ -208,7 +242,7 @@ function trophyPage(p){const T=p.tr||[],have={};T.forEach(([k,t,w])=>(have[k]=ha
  const row=k=>{const F=fam(k),v=(p.tp||{})[k],e=Object.keys(have[k]||{}).length,nx=F.th[e],best=e?F.tiers[e-1]:'';
   const pct=nx==null?100:v==null||v<0?0:Math.min(100,F.low?nx/v*100:v/nx*100);
   return `<div style="flex-wrap:wrap;padding:8px 0"><div style="width:190px">${F.h?hi(F.h,'hi hs')+' ':''}<b>${F.label}${F.link?' *':''}</b><div class="mu" style="font-size:12px">${best?best+' · '+dt(have[k][e-1]):'No tier yet'}</div></div>
-  <div style="display:flex;gap:4px">${F.tiers.map((n,t)=>`<span class="tc ${have[k]&&have[k][t]?'':'off'}" style="--c:${TC[t]}" title="${n} — ${F.low?'under ':''}${fv(F.th[t],F.unit)}${have[k]&&have[k][t]?' · earned '+dt(have[k][t]):''} · ${rar(k,t)}% of players">🏆</span>`).join('')}</div>
+  <div style="display:flex;gap:4px">${F.tiers.map((n,t)=>`<span class="tc ${have[k]&&have[k][t]?'':'off'}" style="--c:${TC[t]}" title="${n} — ${F.low?'under ':''}${fv(F.th[t],F.unit)}${have[k]&&have[k][t]?' · earned '+dt(have[k][t]):''} · ${rar(k,t)}% of players">${ico(k)}</span>`).join('')}</div>
   <div style="flex:1;min-width:160px"><div class="bar"><i style="width:${pct}%"></i></div><div class="mu" style="font-size:12px;margin-top:4px">${nx==null?'All tiers earned':`${fv(v,F.unit)} · next: ${F.tiers[e]} at ${F.low?'under ':''}${fv(nx,F.unit)}`}</div></div></div>`};
  const cats=['Combat','Kill style','Economy','Results','Items','Heroes','Single match'];
  const owned=new Set(p.ti||[]),missing=D.SHOP.filter(i=>!owned.has(i)&&D.IT[i]);
