@@ -2,10 +2,6 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
-## 1.5.0.2
-
-- The GitHub page now has a README with features, commands, setup steps and a link to these patch notes.
-
 ## 1.5.0.1
 
 - The website's sidebar now shows the bot's version under "Last 30 days".
