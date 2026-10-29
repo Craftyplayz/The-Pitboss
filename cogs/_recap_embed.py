@@ -3,53 +3,15 @@ from datetime import datetime, timezone
 
 import discord
 
-from cogs._insights import match_insights
+from core.insights import match_insights
+from core.match import final_build, find_player, place
 
 SLOTS = [("weapon", "Weapon"), ("vitality", "Vitality"), ("spirit", "Spirit")]
 FIELD_MAX = 1024
 
 
-def find_player(meta, account_id):
-    return next((p for p in meta["match_info"]["players"] if p["account_id"] == account_id), None)
-
-
-def place(players, me, key):
-    """1-based position of `me` among all players by a final-stats key, highest first."""
-    return 1 + sum(1 for p in players if p["stats"][-1][key] > me["stats"][-1][key])
-
-
-def final_build(player, items):
-    """Item assets still owned at the end, in purchase order."""
-    seen, out = set(), []
-    for it in player["items"]:
-        item = items.get(it["item_id"])
-        if it["sold_time_s"] == 0 and item and item.get("type") == "upgrade" and it["item_id"] not in seen:
-            seen.add(it["item_id"])
-            out.append(item)
-    return out
-
-
-def souls_timeline(player):
-    return [(s["time_stamp_s"], s["net_worth"]) for s in player["stats"]]
-
-
 def _mmss(s):
     return f"{s // 60}:{s % 60:02d}"
-
-
-def _bar(value, top, width=14):
-    eighths = round(value / top * width * 8) if top else 0
-    full, part = divmod(eighths, 8)
-    return "█" * full + ("", "▏", "▎", "▍", "▌", "▋", "▊", "▉")[part]
-
-
-def souls_block(s):
-    rows = [("Lane creeps", s["gold_lane_creep"]), ("Neutrals", s["gold_neutral_creep"]),
-            ("Hero kills", s["gold_player"]), ("Objectives", s["gold_boss"]), ("Treasure", s["gold_treasure"])]
-    top = max(v for _, v in rows)
-    lines = [f"{n:<13} {v:>6,}  {_bar(v, top)}" for n, v in rows]
-    lines.append(f"{'Lost on death':<13} {-s['gold_death_loss']:>6,}")
-    return "```\n" + "\n".join(lines) + "\n```"
 
 
 def build_field(build, emojis):
@@ -63,22 +25,6 @@ def build_field(build, emojis):
         return "\n".join(rows) or "No items"
     full = text(True)
     return full if len(full) <= FIELD_MAX else text(False)[:FIELD_MAX]
-
-
-def scoreboard(players, me, hero_names, won):
-    def row(p):
-        name = ("▶ " if p is me else "  ") + hero_names.get(p["hero_id"], f"Hero {p['hero_id']}")
-        kda = f"{p['kills']}/{p['deaths']}/{p['assists']}"
-        return f"{name[:15]:<15}{kda:>8}{p['net_worth']:>8,}{p['stats'][-1]['player_damage']:>8,}"
-
-    out = []
-    for label, team, team_won in (("YOUR TEAM", me["team"], won), ("ENEMY TEAM", 1 - me["team"], not won)):
-        ps = sorted((p for p in players if p["team"] == team), key=lambda p: -p["net_worth"])
-        out.append(f"{label} · {'WIN' if team_won else 'LOSS'}   souls {sum(p['net_worth'] for p in ps):,}")
-        out.append(f"{'  Hero':<15}{'K/D/A':>8}{'Souls':>8}{'Dmg':>8}")
-        out += [row(p) for p in ps]
-        out.append("")
-    return "```\n" + "\n".join(out).rstrip() + "\n```"
 
 
 def rank_footer(rank_data, ranks):
@@ -138,9 +84,9 @@ def build_full_embed(match, meta, account_id, earlier, heroes, items, ranks, emo
         color=discord.Color.green() if won else discord.Color.red(),
         timestamp=datetime.fromtimestamp(info["start_time"] + duration, timezone.utc),
     )
-    embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-    if icon := (hero.get("images") or {}).get("icon_image_small"):
-        embed.set_thumbnail(url=icon)
+    # hero icon in the author line, not a thumbnail: a thumbnail narrows every field and makes code blocks wrap
+    icon = (hero.get("images") or {}).get("icon_image_small") or member.display_avatar.url
+    embed.set_author(name=member.display_name, icon_url=icon)
 
     kda = (me["kills"] + me["assists"]) / max(me["deaths"], 1)
     shots = s["shots_hit"] + s["shots_missed"]
@@ -156,11 +102,9 @@ def build_full_embed(match, meta, account_id, earlier, heroes, items, ranks, emo
         if s["hero_bullets_hit"] else "No hero hits")
     creeps = f" · {s['creep_kills'] / s['possible_creeps']:.0%} lane creeps" if s["possible_creeps"] else ""
     add(name="Farm", value=f"{me['last_hits']} LH · {me['denies']} DN{creeps}")
-    add(name="Souls by source", value=souls_block(s), inline=False)
     build = final_build(me, items)
     add(name=f"Final build · {len(build)} items · {sum(i.get('cost') or 0 for i in build):,} souls",
         value=build_field(build, emojis), inline=False)
-    add(name="Scoreboard", value=scoreboard(players, me, hero_names, won), inline=False)
 
     text, rank_icon = rank_footer(me.get("player_rank_data"), ranks)
     embed.set_footer(text=" · ".join(filter(None, [text, f"Match {info['match_id']}"])), icon_url=rank_icon)

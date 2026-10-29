@@ -1,7 +1,8 @@
 import unittest
 from unittest.mock import MagicMock
 
-from cogs._recap_embed import FIELD_MAX, build_field, build_full_embed, final_build, place, rank_lines
+from cogs._recap_embed import FIELD_MAX, build_field, build_full_embed, rank_lines
+from core.match import final_build, place, scoreboard, souls_sources
 
 STATS = dict(player_damage=0, player_healing=0, net_worth=0, player_damage_taken=900, damage_absorbed=10,
              shots_hit=60, shots_missed=40, hero_bullets_hit=20, hero_bullets_hit_crit=5, creep_kills=40,
@@ -64,10 +65,19 @@ class RecapEmbed(unittest.TestCase):
         self.assertIn("Final build · 2 items · 2,400 souls", names)
         self.assertTrue(all(len(f.value) <= FIELD_MAX for f in e.fields))
         self.assertEqual(e.footer.text, "Ascendant 1 · Match 7")
-        self.assertEqual(e.thumbnail.url, "https://x/violet.png")
-        score = e.fields[-1].value
-        self.assertIn("YOUR TEAM · WIN", score)
-        self.assertIn("ENEMY TEAM · LOSS", score)
+        self.assertEqual(e.author.icon_url, "https://x/violet.png")
+        self.assertIsNone(e.thumbnail.url)
+        self.assertNotIn("Scoreboard", names)  # rendered as an image now
+
+    def test_scoreboard_and_sources(self):
+        players = META["match_info"]["players"]
+        me = players[0]
+        teams = scoreboard(players, me, {i: h["name"] for i, h in HEROES.items()}, True)
+        self.assertEqual([(t[0], t[1]) for t in teams], [("YOUR TEAM", True), ("ENEMY TEAM", False)])
+        self.assertEqual(sum(r[4] for t in teams for r in t[3]), 1)  # exactly one is_me row
+        self.assertTrue(teams[0][3][[r[4] for r in teams[0][3]].index(True)][4])
+        self.assertEqual(souls_sources(me["stats"][-1])[-1][0], "Lost on death")
+        self.assertLessEqual(souls_sources(me["stats"][-1])[-1][1], 0)
 
     def test_rank_lines(self):
         # real Match: protection kicked in at the Ascendant 1 boundary

@@ -4,10 +4,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import db
-from api import APIError
-from cogs import _leaderboard_math as lb
-from cogs._shared import WINDOW_DAYS, WINDOW_MIN_MATCHES, window_start
+from core import db
+from core.api import APIError
+from core import leaderboard_math as lb
+from core.shared import WINDOW_DAYS, WINDOW_MIN_MATCHES, window_start
 
 METRICS = ["Rank", "Win rate", "KDA", "Matches played", "Souls per minute", "Rank Climb"]
 CHUNK = 50  # account ids per bulk request, keeps URLs short

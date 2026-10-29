@@ -1,4 +1,4 @@
-"""Helpers shared by cogs. Files starting with _ are not loaded as extensions."""
+"""Constants and helpers shared by the bot and the website."""
 import time
 
 WINDOW_DAYS = 30

@@ -1,5 +1,5 @@
 """Pure Leaderboard math. Aggregates are dicts: matches, wins, kills, deaths, assists, seconds, souls, delta."""
-from cogs._shared import WINDOW_MIN_MATCHES, won
+from core.shared import WINDOW_MIN_MATCHES, won
 
 ZERO = dict(matches=0, wins=0, kills=0, deaths=0, assists=0, seconds=0, souls=0.0, delta=0)
 

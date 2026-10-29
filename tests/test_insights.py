@@ -1,6 +1,6 @@
 import unittest
 
-from cogs._insights import match_insights, profile_insights
+from core.insights import match_insights, profile_insights
 
 
 def entry(i, hero=1, win=True, k=5, d=5, a=5, nw=10000, dur=1200):

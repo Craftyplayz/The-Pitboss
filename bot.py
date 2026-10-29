@@ -4,8 +4,8 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-import db
-from api import DeadlockAPI
+from core import db
+from core.api import DeadlockAPI
 
 GUILD = discord.Object(id=int(os.environ["GUILD_ID"]))
 

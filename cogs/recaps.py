@@ -6,13 +6,14 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import commands, tasks
 
-import db
-from api import APIError
-from cogs._insights import match_insights
+from core import db
+from core.api import APIError
+from core.insights import match_insights
 from cogs._item_emojis import ItemEmojis
-from cogs._recap_embed import build_full_embed, final_build, find_player, souls_timeline
-from cogs._souls_graph import souls_graph
-from cogs._shared import won
+from cogs._recap_embed import build_full_embed
+from core.match import final_build, find_player, scoreboard, souls_sources, souls_timeline
+from core.recap_images import scoreboard_image, souls_image
+from core.shared import won
 
 MAX_AGE = 24 * 3600  # a Match after the Link missed for longer than this gets no recap
 BACKFILL = 30 * 86400  # on link, Matches from this long before it get recaps too
@@ -144,7 +145,12 @@ class Recaps(commands.Cog):
         emojis = {i["id"]: await self.emojis.get(i) for i in final_build(me, items)}
         embed = build_full_embed(match, meta, account_id, earlier, heroes, items, ranks, emojis, member)
         embed.set_image(url="attachment://souls.png")
-        return {"embed": embed, "file": discord.File(souls_graph(souls_timeline(me)), "souls.png")}
+        players, hero_names = meta["match_info"]["players"], {i: h["name"] for i, h in heroes.items()}
+        # a second image-only embed, since one embed holds one image
+        board = discord.Embed(color=embed.color).set_image(url="attachment://scoreboard.png")
+        return {"embeds": [embed, board], "files": [
+            discord.File(souls_image(souls_timeline(me), souls_sources(me["stats"][-1])), "souls.png"),
+            discord.File(scoreboard_image(scoreboard(players, me, hero_names, won(match))), "scoreboard.png")]}
 
     async def usable_thread(self, forum, thread_id):
         """The Recap Thread if it can still take posts; sending unarchives it unless it is locked."""

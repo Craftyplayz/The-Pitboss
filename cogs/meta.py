@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from api import APIError
+from core.api import APIError
 
 DAYS = 7
 CACHE_SECONDS = 600

@@ -6,8 +6,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import db
-from api import APIError
+from core import db
+from core.api import APIError
 
 STEAM64_BASE = 76561197960265728
 URL_RE = re.compile(r"^(?:https?://)?(?:www\.)?steamcommunity\.com/profiles/(\d+)/?$", re.I)

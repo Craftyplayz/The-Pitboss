@@ -4,9 +4,9 @@ import unittest
 from unittest.mock import MagicMock
 
 try:
-    import cogs._insights  # noqa: F401
+    import core.insights  # noqa: F401
 except ImportError:  # written by another agent; stub so this module imports
-    sys.modules["cogs._insights"] = types.SimpleNamespace(match_insights=lambda m, h, n: ["insight"])
+    sys.modules["core.insights"] = types.SimpleNamespace(match_insights=lambda m, h, n: ["insight"])
 
 from cogs.recaps import MAX_AGE, build_embed, due_matches
 

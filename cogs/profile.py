@@ -1,22 +1,21 @@
+import asyncio
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-import db
-from api import APIError
-from cogs._insights import profile_insights
-from cogs._shared import WINDOW_DAYS, window_start, won
-
-
-def kda(ms):
-    return sum(m["player_kills"] + m["player_assists"] for m in ms) / max(sum(m["player_deaths"] for m in ms), 1)
+from core import db
+from core.api import APIError
+from cogs._profile_embed import build_profile_embed, trend
+from core.shared import window_start
+from core.graphs import line_graph
 
 
 class Profile(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(description="Show a Player's Profile: rank, win rate, heroes and insights")
+    @app_commands.command(description="Show a Player's Profile: stats, heroes, teammates and records")
     @app_commands.describe(member="Whose Profile to show (default: you)")
     async def profile(self, interaction: discord.Interaction, member: discord.Member | None = None):
         member = member or interaction.user
@@ -26,50 +25,44 @@ class Profile(commands.Cog):
             await interaction.response.send_message(f"{who} linked a Deadlock account. Use /link first.", ephemeral=True)
             return
         await interaction.response.defer()
-        aid = link["account_id"]
+        aid, since = link["account_id"], window_start()
+        api = self.bot.api
         try:
-            api = self.bot.api
-            info = await api.get("/v1/players/steam", account_ids=aid)
-            rank = await api.get(f"/v1/players/{aid}/rank")
-            ranks = await api.get("/v1/assets/ranks")
-            history = await api.get(f"/v1/players/{aid}/match-history") or []
-            heroes = await api.heroes()
+            steam, rank, history, hero_stats, mates, heroes, ranks = await asyncio.gather(
+                api.get("/v1/players/steam", account_ids=aid),
+                api.get(f"/v1/players/{aid}/rank"),
+                api.get(f"/v1/players/{aid}/match-history"),
+                api.get("/v1/players/hero-stats", account_ids=aid, min_unix_timestamp=since),
+                api.get(f"/v1/players/{aid}/mate-stats", min_unix_timestamp=since),
+                api.heroes(),
+                api.ranks(),
+            )
+            mates = sorted(mates or [], key=lambda x: -x["matches_played"])[:3]
+            names = {}
+            if mates:
+                found = await api.get("/v1/players/steam", account_ids=",".join(str(x["mate_id"]) for x in mates))
+                names = {p["account_id"]: p["personaname"] for p in found or []}
         except APIError as e:
             await interaction.followup.send(str(e), ephemeral=True)
             return
 
-        names = {i: h["name"] for i, h in heroes.items()}
-        name = info[0]["personaname"] if info else f"Player {aid}"
-        embed = discord.Embed(title=f"{name}'s Profile", description=f"Linked to {member.mention}")
-        if rank and rank.get("badge"):
-            tier, sub = divmod(rank["badge"], 10)
-            tier_name = next((r["name"] for r in ranks or [] if r["tier"] == tier), f"Tier {tier}")
-            embed.add_field(name="Rank", value=f"{tier_name} {sub}" if sub else tier_name)
-        else:
-            embed.add_field(name="Rank", value="Unranked")
+        badge = (rank or {}).get("badge") or 0
+        tier, sub = divmod(badge, 10)
+        rank_asset = ranks.get(tier) if badge else None
+        rank_text = f"{rank_asset['name']} {sub}" if rank_asset else "Unranked"
+        rank_icon = (rank_asset.get("images") or {}).get(f"small_subrank{sub}") if rank_asset else None
+        window = [m for m in history or [] if m["start_time"] >= since]
+        linked = {r["account_id"]: r["member_id"] for r in db.all_links(self.bot.db)}
 
-        recent = [m for m in history if m["start_time"] >= window_start()]
-        if recent:
-            wins = sum(map(won, recent))
-            mins = sum(m["match_duration_s"] for m in recent) / 60
-            embed.add_field(name=f"Last {WINDOW_DAYS} days", value=(
-                f"{len(recent)} matches, {wins / len(recent):.0%} win rate\n"
-                f"KDA {kda(recent):.2f}, {sum(m['net_worth'] for m in recent) / max(mins, 1):.0f} souls/min"), inline=False)
-        else:
-            embed.add_field(name=f"Last {WINDOW_DAYS} days", value="No matches", inline=False)
-
-        # shortcut: top heroes use all stored history, not just the window; narrow if that confuses
-        by_hero = {}
-        for m in history:
-            by_hero.setdefault(m["hero_id"], []).append(won(m))
-        top = sorted(by_hero.items(), key=lambda kv: -len(kv[1]))[:3]
-        if top:
-            embed.add_field(name="Most played", inline=False, value="\n".join(
-                f"{names.get(h, 'Hero ' + str(h))}: {len(w)} matches, {sum(w) / len(w):.0%} win rate" for h, w in top))
-        lines = profile_insights(history, names)
-        if lines:
-            embed.add_field(name="Insights", value="\n".join(lines), inline=False)
-        await interaction.followup.send(embed=embed)
+        embed = build_profile_embed(member, (steam or [None])[0], rank_text, rank_icon, window,
+                                    hero_stats or [], mates, names, linked, heroes)
+        graph = trend(window, ranked=bool(badge))
+        if graph is None:
+            await interaction.followup.send(embed=embed)
+            return
+        points, title, kwargs = graph
+        embed.set_image(url="attachment://trend.png")
+        await interaction.followup.send(embed=embed, file=discord.File(line_graph(points, title, **kwargs), "trend.png"))
 
 
 async def setup(bot):

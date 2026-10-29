@@ -1,6 +1,6 @@
 import unittest
 
-from cogs._leaderboard_math import from_hero_stats, from_history, rank_board, rank_by_badge
+from core.leaderboard_math import from_hero_stats, from_history, rank_board, rank_by_badge
 
 
 def m(hero=1, k=5, d=0, a=5, t=1000, res=1, team=1, delta=10, dur=600, nw=6000):

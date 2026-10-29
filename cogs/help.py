@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs._shared import WINDOW_DAYS, WINDOW_MIN_MATCHES
+from core.shared import WINDOW_DAYS, WINDOW_MIN_MATCHES
 
 # (title, [(field name, field value)]). Admin-only commands (/setup) are left out on purpose.
 PAGES = [
@@ -28,8 +28,9 @@ PAGES = [
     ]),
     ("Your stats", [
         ("/profile member:",
-         f"Your rank, Matches and win rate over the last {WINDOW_DAYS} days, KDA, souls per minute, "
-         "your 3 most-played heroes and a few insights. Pick a member to see their Profile instead."),
+         f"Your last {WINDOW_DAYS} days: record, KDA, souls and damage per minute, accuracy, time played, "
+         "your last 10 results, top heroes, best teammates, personal records and a trend graph "
+         "(rank progress if you play ranked, win rate if not). Pick a member to see their Profile instead."),
     ]),
     ("Leaderboards", [
         ("/leaderboard metric: hero:",
