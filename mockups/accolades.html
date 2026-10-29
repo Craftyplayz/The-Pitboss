@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Accolades - Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0e1319;--card:#161c25;--line:#232c39;--tx:#dce3ec;--mu:#8190a3;--gold:#F0C35A;--win:#4fc98a;--loss:#e5636d;--r:12px;--t0:#c98a5a;--t1:#b9c4d2;--t2:#F0C35A;--t3:#7fd6ff}
+*{box-sizing:border-box;margin:0}
+html,body{overflow-x:hidden}
+body{background:var(--bg);color:var(--tx);font:14px/1.45 Inter,system-ui,sans-serif;padding:24px 16px 60px;max-width:900px;margin:auto}
+h1{font:700 26px Cinzel,serif;color:var(--gold);letter-spacing:.05em}
+h2{font:700 18px Cinzel,serif;color:var(--gold);margin:38px 0 4px}
+.sub{color:var(--mu);font-size:13px;margin:4px 0 14px}
+.note{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-top:10px;font-size:13px}
+.note b{color:var(--gold)} .note li{margin-left:18px;margin-top:4px} code{background:#0a0e13;padding:1px 5px;border-radius:4px;font-size:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.dc{background:#313338;border-radius:8px;padding:14px;font-family:system-ui,sans-serif}
+.dc .emb{background:#2b2d31;border-left:4px solid var(--win);border-radius:4px;padding:10px 14px 12px;max-width:520px;color:#dbdee1;font-size:14px}
+.dc .au{font-size:13px;font-weight:600;margin-bottom:4px;color:#fff}
+.dc .ti{font-weight:700;color:#fff;margin-bottom:6px}
+.dc .ds{font-size:13.5px;margin-bottom:8px}
+.fl{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
+.fl b,.fw b{display:block;font-size:12px;color:#fff} .fl span{font-size:13px}
+.fw{margin-top:8px}
+.ac{display:flex;flex-wrap:wrap;gap:6px;margin-top:3px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:#1e1f22;border-radius:6px;padding:3px 8px 3px 4px;font-size:12.5px}
+.ic{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:13px;border:2px solid var(--c,var(--t0));background:#14181f;flex:none}
+.t0{--c:var(--t0)}.t1{--c:var(--t1)}.t2{--c:var(--t2)}.t3{--c:var(--t3)}
+.ft{font-size:12px;color:#949ba4;margin-top:10px}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+@media(max-width:640px){.cmp{grid-template-columns:1fr}.fl{grid-template-columns:1fr 1fr}}
+.cmp h4{font-size:13px;color:var(--gold);margin-bottom:6px} .cmp p{font-size:13px;color:var(--mu)}
+.top{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.stat{flex:1 1 130px;background:#0f151d;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.stat small{color:var(--mu);font-size:11px;text-transform:uppercase;letter-spacing:.06em;display:block}
+.stat b{font-size:20px} .stat b i{font-style:normal;color:var(--mu);font-size:13px;font-weight:500}
+.bar{height:6px;background:#0a0e13;border-radius:4px;margin-top:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--gold)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.ac2{background:#0f151d;border:1px solid var(--line);border-radius:10px;padding:14px 8px 12px;text-align:center;position:relative}
+.ac2 .ic{width:46px;height:46px;font-size:22px;margin:0 auto 6px;border-width:3px}
+.ac2 b{display:block;font-size:12.5px;line-height:1.25} .ac2 small{color:var(--mu);font-size:11px;display:block;margin-top:2px}
+.ac2.lock{opacity:.4;filter:grayscale(1)} .ac2.lock .ic{border-style:dashed;border-color:var(--mu)}
+.ac2 .n{position:absolute;top:6px;right:8px;font-size:11px;color:var(--gold);font-weight:700}
+.ac2.rare{border-color:var(--gold)}
+.tag{position:absolute;top:6px;left:8px;font-size:9px;background:var(--gold);color:#111;border-radius:4px;padding:1px 5px;font-weight:700}
+.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}.tabs span{padding:5px 12px;border-radius:99px;background:#0f151d;border:1px solid var(--line);font-size:12px;color:var(--mu)}.tabs .on{color:var(--gold);border-color:var(--gold)}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--mu);font-weight:500;font-size:11px;text-transform:uppercase}
+td.r,th.r{text-align:right}.rank{color:var(--gold);font-weight:700;width:26px}
+.ms{display:flex;gap:3px;flex-wrap:wrap;min-width:110px}.ms .ic{width:22px;height:22px;font-size:11px;border-width:2px}
+.tg{font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px}
+.tg.acc{background:#F0C35A22;color:var(--gold)}.tg.tro{background:#7fd6ff22;color:var(--t3)}
+</style></head><body>
+<h1>Accolades</h1>
+<p class="sub">The game's own end-of-match accolades, shown on recaps and collected on profiles. Real names and stat values (match 127132809); icons are placeholder glyphs.</p>
+
+<div class="note"><b>What the API gives us</b>
+<ul>
+<li><b>Match metadata DOES include awarded accolades.</b> Each <code>match_info.players[].accolades[]</code> is <code>{accolade_id, accolade_stat_value, accolade_threshold_achieved}</code>. Achieved <code>-1</code> = not earned; <code>0, 1, 2...</code> = earned at that tier index. The bot does not compute anything.</li>
+<li><code>GET /v1/assets/accolades</code> (31 entries) gives only <code>id, class_name, flavor_name, tracked_stat_name, description</code> (a template with <code>{stat_value}</code>), <code>threshold_type</code> (automatic / manual) and optional <code>enabled_game_modes</code>. <b>No icons and no threshold numbers</b>, so tier colours here are our own guess and icons need our own art or emoji.</li>
+<li>Every player gets a row for every accolade with their raw stat, so "closest to earning" progress is free.</li>
+</ul></div>
+<div class="note"><b>Not the same as Trophies.</b> Trophies (<code>core/trophies.py</code>) are the bot's own lifetime tiers computed from match history (e.g. Slayer = 250 career kills). Accolades are the game's per-match badges, awarded when one match's stat passes a threshold. Overlap: kills, assists, souls, healing and damage exist in both, but a trophy is a career total and an accolade is a single match. Accolades get their own tab and a round medal icon (trophies are cups); where both show together, tag them <span class="tg acc">ACCOLADE</span> / <span class="tg tro">TROPHY</span>.</div>
+
+<h2>A. Match recap embed</h2>
+<p class="sub">One new field in <code>build_full_embed</code>, under Final build. Only earned accolades, best tier first, capped at about 6 with "+N more".</p>
+<div class="dc"><div class="emb">
+<div class="au">Crafty</div>
+<div class="ti">Haze · Win · 30:12</div>
+<div class="ds"><b>Most hero damage in the Match</b> (23,610, #1 of 12).</div>
+<div class="fl"><div><b>K / D / A</b><span>10 / 3 / 4 · KDA 4.7</span></div><div><b>Souls</b><span>26,838 · 888/min</span></div><div><b>Hero damage</b><span>23,610 · #1</span></div></div>
+<div class="fw"><b>Final build · 12 items · 38,400 souls</b><span style="font-size:13px">Weapon ... · Vitality ... · Spirit ...</span></div>
+<div class="fw"><b>Accolades earned · 3</b><div class="ac" id="recap"></div></div>
+<div class="ft">Archon 3 · Match 127132809</div></div></div>
+<div class="cmp">
+<div class="card"><h4>Compact: icons only</h4><p>Custom emoji, no text, like the build field's fallback when it is too long.</p><div class="ac" style="margin-top:8px" id="recap2"></div></div>
+<div class="card"><h4>Fields used</h4><p><code>players[me].accolades[]</code> where <code>accolade_threshold_achieved &gt;= 0</code>, joined to <code>/v1/assets/accolades</code> on <code>accolade_id</code> for <code>flavor_name</code>; the stat text fills <code>description</code> with <code>accolade_stat_value</code>.</p></div></div>
+
+<h2>B. Profile / website collection</h2>
+<p class="sub">New "Accolades" tab next to Trophies. Earned = best tier ever reached and times awarded; locked = never earned.</p>
+<div class="card">
+<div class="top">
+<div class="stat"><small>Collected</small><b id="cc"></b><div class="bar"><i id="cb"></i></div></div>
+<div class="stat"><small>Times awarded</small><b>221 <i>in 96 matches</i></b></div>
+<div class="stat"><small>Rarest earned</small><b style="font-size:15px">Keeping Your Distance</b><span style="color:var(--mu);font-size:12px">3 times, 3% of matches</span></div>
+</div>
+<div class="tabs"><span class="on">All</span><span>Earned</span><span>Locked</span></div>
+<div class="grid" id="coll"></div></div>
+<div class="note">Rarest is the bot's own rate: awards of that accolade divided by the member's stored matches (or the whole server's). Not a game value. Locked tiles would show the description ("Headshots in one match") so people know what to chase.</div>
+
+<h2>C. Server leaderboard: most accolades this month</h2>
+<p class="sub">Optional panel on the server hub, or a <code>/accolades</code> embed. Counts awards in stored match metadata for the window.</p>
+<div class="card scroll"><table><thead><tr><th></th><th>Player</th><th>Top accolades</th><th class="r">Awards</th><th class="r">Per match</th></tr></thead><tbody id="lb"></tbody></table></div>
+
+<script>
+const A={1:["Killer Instinct","⚔"],2:["Accomplished Accomplice","🤝"],3:["The Doctor is In","✚"],4:["Bring the Pain","💥"],5:["I'm Rich","💰"],6:["Super Troopers","🪖"],7:["Filthy Neutral Scum","🌲"],8:["Heavy Hitter","🔨"],9:["Social Security","🔒"],10:["None for You","🚫"],11:["Championship Box-er","📦"],12:["Power Overwhelming","⚡"],13:["High Urner","🏺"],14:["Ka-Ching","🎰"],15:["First of Many","🩸"],16:["We're Going Streaking","🔥"],17:["Up Close and Personal","🗡"],18:["From Downtown","🎯"],19:["Gunslinger","🔫"],20:["Punch-Out","👊"],21:["The Deadly Spirit","✨"],22:["Shooty McShootypants","💢"],23:["Talk to the Hand","✋"],24:["The Zapper","🔆"],25:["Master at Arms","🛡"],26:["Well Protected","🧱"],27:["Resilient","🪨"],28:["Pow, Right in the Kisser","🤯"],29:["Head First","💀"],30:["In Your Face","😤"],31:["Keeping Your Distance","🔭"]};
+const ic=(id,t)=>`<span class="ic t${t}" title="${A[id][0]}">${A[id][1]}</span>`;
+const chip=(id,t)=>`<span class="chip">${ic(id,t)}${A[id][0]}</span>`;
+// real awards from sample match: id 21 tier 1, 17 tier 0, 16 tier 0
+recap.innerHTML=chip(21,1)+chip(17,0)+chip(16,0);
+recap2.innerHTML=[[21,1],[17,0],[16,0]].map(([i,t])=>ic(i,t)).join("");
+const earned={1:[2,41],4:[1,19],5:[1,22],16:[0,6],17:[1,9],19:[0,12],21:[1,14],3:[0,8],8:[0,11],12:[0,5],24:[0,10],28:[0,4],31:[0,3],6:[0,15],9:[0,7],22:[1,13],25:[0,2]};
+const n=Object.keys(earned).length;
+cc.innerHTML=n+' <i>/ 31</i>';cb.style.width=n/31*100+'%';
+coll.innerHTML=Object.keys(A).map(id=>{const e=earned[id];
+ if(!e)return `<div class="ac2 lock"><span class="ic">${A[id][1]}</span><b>${A[id][0]}</b><small>Not earned yet</small></div>`;
+ return `<div class="ac2 ${id==31?'rare':''}">${id==31?'<span class="tag">RAREST</span>':''}<span class="n">x${e[1]}</span><span class="ic t${e[0]}">${A[id][1]}</span><b>${A[id][0]}</b><small>best: tier ${e[0]+1}</small></div>`}).join("");
+const rows=[["Crafty",[[21,1],[4,1],[16,0],[5,1],[17,1]],31,2.1],["Mav",[[3,1],[1,0],[8,0],[24,0]],27,1.8],["Nova",[[19,0],[28,0],[22,1]],22,1.6],["Rook",[[6,0],[9,0],[12,0]],18,1.2]];
+lb.innerHTML=rows.map((r,i)=>`<tr><td class="rank">${i+1}</td><td>${r[0]}</td><td><div class="ms">${r[1].map(([a,t])=>ic(a,t)).join("")}</div></td><td class="r"><b>${r[2]}</b></td><td class="r">${r[3]}</td></tr>`).join("");
+</script></body></html>
