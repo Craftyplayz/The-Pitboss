@@ -175,5 +175,16 @@ Ravenye won 4 of 41 wins in under 25 min, 2 under 20 min, and one in 11 min. Acc
 
 ## Open questions
 
-1. Melee items: skip a melee item trophy (Melee kills already covers melee players), or add a "Melee items bought" family from a hand-picked item list that needs updating when patches add melee items?
+1. Melee items: these are spread across all 3 shop categories, so no single category trophy covers a melee build:
+
+   | Item | Category |
+   |---|---|
+   | Melee Charge, Crushing Fists | Weapon |
+   | Melee Lifesteal, Lifestrike | Vitality |
+   | Spirit Strike, Spirit Snatch | Spirit |
+
+   - **Option A (recommended): no melee item trophy.** Melee kills already rewards melee players and needs no upkeep.
+   - **Option B: a "Melee items bought" family** from a hand-picked item list in the code. When a patch adds a melee item, it has to be added to the list or it won't count.
+
+   The list above was picked from the shop by name and description, so it may be incomplete.
 2. Daily Grind: which timezone counts as "a day"?
