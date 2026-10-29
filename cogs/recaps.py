@@ -47,23 +47,31 @@ def due_matches(history, linked_at, last_match_id, now):
     return recap, skip_to
 
 
-def build_embed(match, history, hero_names, member):
+def build_embed(match, history, heroes, member):
+    """Fallback recap from the match-history entry alone, styled like the full recap."""
     win = won(match)
-    hero = hero_names.get(match["hero_id"], f"Hero {match['hero_id']}")
+    hero_names = {i: h["name"] for i, h in heroes.items()}
+    hero = heroes.get(match["hero_id"], {})
     duration = match["match_duration_s"]
+    minutes = max(duration / 60, 1)
+    lines = match_insights(match, history, hero_names) + ["-# Full stats weren't available for this Match."]
     embed = discord.Embed(
-        title=f"{hero} - {'Win' if win else 'Loss'}",
-        description="\n".join(match_insights(match, history, hero_names)) or None,
+        title=f"{hero.get('name', 'Hero ' + str(match['hero_id']))} · {'Win' if win else 'Loss'} · {duration // 60}:{duration % 60:02d}",
+        description="\n".join(lines),
         color=discord.Color.green() if win else discord.Color.red(),
         timestamp=datetime.fromtimestamp(match_end(match), timezone.utc),
     )
+    if icon := (hero.get("images") or {}).get("icon_image_small"):
+        embed.set_thumbnail(url=icon)
     embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-    embed.add_field(name="K/D/A", value=f"{match['player_kills']}/{match['player_deaths']}/{match['player_assists']}")
-    embed.add_field(name="Souls", value=f"{match['net_worth']:,}")
-    embed.add_field(name="Souls/min", value=f"{match['net_worth'] / max(duration / 60, 1):,.0f}")
-    embed.add_field(name="Duration", value=f"{duration // 60}:{duration % 60:02d}")
+    kda = (match["player_kills"] + match["player_assists"]) / max(match["player_deaths"], 1)
+    add = embed.add_field
+    add(name="K / D / A", value=f"{match['player_kills']} / {match['player_deaths']} / {match['player_assists']} · KDA {kda:.1f}")
+    add(name="Souls", value=f"{match['net_worth']:,} · {match['net_worth'] / minutes:,.0f}/min")
+    add(name="Level", value=str(match["hero_level"]))
+    add(name="Farm", value=f"{match['last_hits']} LH · {match['denies']} DN")
     if match.get("ranked_delta"):
-        embed.add_field(name="Rank change", value=f"{match['ranked_delta']:+d}")
+        add(name="Rank change", value=f"{match['ranked_delta']:+d}")
     embed.set_footer(text=f"Match {match['match_id']}")
     return embed
 
@@ -158,7 +166,7 @@ class Recaps(commands.Cog):
             if post is None:
                 if time.time() - match_end(match) < META_WAIT:
                     break  # metadata not ready yet; retry next run so the recap gets the full layout
-                post = {"embed": build_embed(match, earlier, hero_names, member)}
+                post = {"embed": build_embed(match, earlier, heroes, member)}
             add_site_links(post, match, link["account_id"], hero_names.get(match["hero_id"], "Hero"))
             if thread:
                 await asyncio.sleep(POST_DELAY)

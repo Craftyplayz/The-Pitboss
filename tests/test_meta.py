@@ -1,6 +1,6 @@
 import unittest
 
-from cogs.meta import fit_table, fmt_table, hero_embed, place, rank_by_wr, trend_points, week_change, win_rate
+from cogs.meta import hero_embed, place, rank_by_wr, trend_points, week_change, win_rate
 
 
 class MetaHelpers(unittest.TestCase):
@@ -16,15 +16,6 @@ class MetaHelpers(unittest.TestCase):
         ]
         out = rank_by_wr(rows, "w", "m", 100)
         self.assertEqual([r["w"] for r in out], [60, 55])
-
-    def test_table_alignment(self):
-        t = fmt_table(("Hero", "Win"), [("Abrams", "51.0%"), ("Ivy", "9.5%")])
-        self.assertEqual(t.split("\n")[2], "Abrams  51.0%")
-        self.assertEqual(t.split("\n")[3], "Ivy      9.5%")
-
-    def test_fit_table_truncates(self):
-        rows = [("x" * 50, "1") for _ in range(200)]
-        self.assertLessEqual(len(fit_table(("a", "b"), rows)), 4000)
 
 
 class HeroEmbed(unittest.TestCase):

@@ -12,7 +12,9 @@ from discord.ext import commands, tasks
 
 from core import db
 from core.api import APIError
+from cogs._item_emojis import ItemEmojis
 from core.dashboard import match_detail
+from core.recap_images import scoreboard_image
 from core.shared import SITE_URL
 
 TEAMS = ("Amber", "Sapphire")
@@ -38,10 +40,17 @@ def mentions(ids):
     return "\n".join(f"<@{m}>" for m in ids) or "–"
 
 
+STATE_WORDS = {"open": "sign-up open", "picking": "picking teams", "creating": "making the lobby", "lobby": "lobby open",
+               "live": "match live", "done": "finished", "failed": "no scoreboard", "cancelled": "cancelled"}
+SQUARES = ("🟧", "🟦")  # Amber, Sapphire
+COLORS = (discord.Color.orange(), discord.Color.blue())
+
+
 def signup(scrim, players):
     """(embed, view) for the sign-up message in the scrim's current state. players: [(member_id, team)]."""
     sid, state = scrim["id"], scrim["state"]
     embed = discord.Embed(title=f"Scrim #{sid}", color=discord.Color.gold())
+    embed.set_author(name=f"Scrim · {STATE_WORDS.get(state, state)}")
     lines = [f"Created by <@{scrim['creator_id']}>."]
     view = discord.ui.View(timeout=None)
     if state == "open":
@@ -53,11 +62,11 @@ def signup(scrim, players):
     else:
         for t, name in enumerate(TEAMS):
             team = [m for m, pt in players if pt == t]
-            embed.add_field(name=f"{name} ({len(team)}/{TEAM_SIZE})", value=mentions(team))
+            embed.add_field(name=f"{SQUARES[t]} {name} ({len(team)}/{TEAM_SIZE})", value=mentions(team))
     if state == "picking":
         unpicked = [m for m, t in players if t is None]
         if unpicked:
-            embed.add_field(name="Not picked yet", value=mentions(unpicked), inline=False)
+            embed.add_field(name=f"Not picked yet ({len(unpicked)})", value=mentions(unpicked), inline=False)
         embed.set_footer(text="Pick your team. The creator presses Make lobby when everyone has picked.")
         ready = not unpicked and all(any(t == team for _, t in players) for team in (0, 1))
         view.add_item(button(f"Join {TEAMS[0]}", "team0", sid, discord.ButtonStyle.primary))
@@ -67,7 +76,7 @@ def signup(scrim, players):
     elif state == "creating":
         lines.append("Making the lobby…")
     elif state == "lobby":
-        embed.add_field(name="Lobby code", value=f"**{scrim['party_code']}**", inline=False)
+        embed.add_field(name="Lobby code", value=f"```\n{scrim['party_code']}\n```", inline=False)  # keep last
         lines.append("In Deadlock, join the custom lobby with this code and take your team's side. "
                      "The code works for 15 minutes; if it runs out, the creator presses New code.")
         view.add_item(button("New code", "lobby", sid))
@@ -85,19 +94,45 @@ def signup(scrim, players):
     return embed, view
 
 
-def result_embed(scrim_id, detail, hero_names, linked):
-    """The finished scrim's scoreboard. detail: match_detail output. linked: {account_id: member_id}."""
-    win, dur = detail["win"], detail["dur"]
+def short(n):
+    return f"{n / 1000:.1f}K" if n >= 1000 else str(n)
+
+
+def scoreboard_png(detail, hero_names):
+    """The scoreboard image (BytesIO) for result_embed's attachment://scoreboard.png, drawn like the recaps'."""
+    teams = []
+    for t in (0, 1):
+        rows = sorted((p for p in detail["pl"] if p["team"] == t), key=lambda p: -p["nw"])
+        teams.append((TEAMS[t].upper(), t == detail["win"], sum(p["nw"] for p in rows), [
+            (hero_names.get(p["hero"], "Hero"), f"{p['k']}/{p['d']}/{p['a']}", p["nw"], p["dmg"], False) for p in rows]))
+    return scoreboard_image(teams)
+
+
+def result_embed(scrim_id, detail, hero_names, linked, hero_emojis=None):
+    """The finished scrim's scoreboard. detail: match_detail output. linked: {account_id: member_id}.
+    hero_emojis: {hero_id: emoji text}, missing heroes get no icon. The caller attaches scoreboard_png as scoreboard.png."""
+    win, dur, hero_emojis = detail["win"], detail["dur"], hero_emojis or {}
 
     def who(p):  # nm is HTML-escaped for the website
         return f"<@{linked[p['id']]}>" if p["id"] in linked else discord.utils.escape_markdown(html.unescape(p["nm"]))
 
-    embed = discord.Embed(title=f"Scrim #{scrim_id} · {TEAMS[win]} wins", url=f"{SITE_URL}/#scrims/{scrim_id}",
-                          color=discord.Color.gold(), timestamp=datetime.fromtimestamp(detail["t"] + dur, timezone.utc))
+    def hero(p):
+        return f"{hero_emojis.get(p['hero'], '')} **{hero_names.get(p['hero'], 'Hero')}**".strip()
+
+    embed = discord.Embed(title=f"{TEAMS[win]} wins", url=f"{SITE_URL}/#scrims/{scrim_id}", color=COLORS[win],
+                          timestamp=datetime.fromtimestamp(detail["t"] + dur, timezone.utc))
+    embed.set_author(name=f"Scrim #{scrim_id} · finished")
     for t in (0, 1):
         rows = sorted((p for p in detail["pl"] if p["team"] == t), key=lambda p: -p["nw"])
-        embed.add_field(name=f"{TEAMS[t]}{' 🏆' if t == win else ''}", inline=False, value="\n".join(
-            f"**{hero_names.get(p['hero'], 'Hero')}** · {who(p)} · {p['k']}/{p['d']}/{p['a']} · {p['nw']:,} souls · {p['dmg']:,} dmg" for p in rows) or "–")
+        name = (f"{SQUARES[t]} {TEAMS[t]}{' 🏆' if t == win else ''} · {short(sum(p['nw'] for p in rows))} souls"
+                f" · {sum(p['k'] for p in rows)} kills")
+        embed.add_field(name=name, inline=False, value="\n".join(
+            f"{hero(p)} · {who(p)} · {p['k']}/{p['d']}/{p['a']} · {short(p['nw'])} souls · {short(p['dmg'])} dmg"
+            for p in rows) or "–")
+    if detail["pl"]:
+        mvp = max(detail["pl"], key=lambda p: p["dmg"])  # MVP = most damage
+        embed.description = f"MVP (most damage): {hero(mvp)} · {who(mvp)} · {short(mvp['dmg'])} dmg"
+    embed.set_image(url="attachment://scoreboard.png")
     embed.set_footer(text=f"Match {detail['id']} · {dur // 60}:{dur % 60:02d}")
     return embed
 
@@ -105,6 +140,7 @@ def result_embed(scrim_id, detail, hero_names, linked):
 class Scrims(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.emojis = ItemEmojis(bot)
 
     async def cog_load(self):
         self.watch.start()
@@ -310,12 +346,15 @@ class Scrims(commands.Cog):
         db.update_scrim(self.bot.db, sid, state="done", detail=json.dumps(detail, separators=(",", ":")))
         await self.refresh(sid)
         linked = {l["account_id"]: l["member_id"] for l in db.all_links(self.bot.db)}
-        embed = result_embed(sid, detail, {i: h["name"] for i, h in (await api.heroes()).items()}, linked)
+        heroes = await api.heroes()
+        shown = {p["hero"] for p in detail["pl"]}
+        hero_emojis = {i: await self.emojis.hero(h) for i, h in heroes.items() if i in shown}
+        hero_names = {i: h["name"] for i, h in heroes.items()}
+        embed = result_embed(sid, detail, hero_names, linked, hero_emojis)
         log_id = db.get_setting(self.bot.db, "scrim_log_id")
         for channel_id in {scrim["channel_id"], int(log_id) if log_id else None} - {None}:
             if channel := self.bot.get_channel(channel_id):
-                await channel.send(embed=embed)
-
+                await channel.send(embed=embed, file=discord.File(scoreboard_png(detail, hero_names), "scoreboard.png"))
 
 async def setup(bot):
     await bot.add_cog(Scrims(bot))

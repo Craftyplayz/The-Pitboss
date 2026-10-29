@@ -24,6 +24,31 @@ def fmt(metric, v):
     return f"{v:.0f}"
 
 
+MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+
+def board_embed(rows, metric, me, foot, hero=None, thumb=None):
+    """Pure embed builder. rows: [(member_id, value_text, context)] best first; me: caller's member id.
+    hero: (name, rgb or None) when filtered to a hero. thumb: image url or None."""
+    def row(i):
+        m, v, ctx = rows[i]
+        place = MEDALS.get(i + 1, f"**{i + 1}.**")
+        return f"{'▶ ' if m == me else ''}{place} <@{m}> · **{v}**" + (f" · {ctx}" if ctx else "")
+
+    lines = [row(i) for i in range(min(TOP, len(rows)))]
+    mine = next((i for i, r in enumerate(rows) if r[0] == me), None)
+    if mine is not None and mine >= TOP:
+        lines += ["…", row(mine)]
+    name, rgb = hero or (None, None)
+    color = discord.Color.from_rgb(*rgb) if rgb else discord.Color.gold()
+    tail = f" · {name}" if name else ""
+    embed = discord.Embed(title=metric + tail, description="\n".join(lines), color=color)
+    embed.set_author(name=f"Leaderboard · {metric}{tail}")
+    if thumb:
+        embed.set_thumbnail(url=thumb)
+    return embed.set_footer(text=foot)
+
+
 async def fail(interaction, text):
     """Error after a public defer: drop the placeholder so the followup can be ephemeral."""
     await interaction.delete_original_response()
@@ -90,7 +115,8 @@ class Leaderboard(commands.Cog):
             if metric == "Rank":
                 rows, failed = await self.bulk("/v1/players/rank", accounts)
                 board = lb.rank_by_badge({r["account_id"]: r.get("badge") for r in rows})
-                names = {r["tier"]: r["name"] for r in await self.bot.api.get("/v1/assets/ranks") or []}
+                rank_assets = await self.bot.api.get("/v1/assets/ranks") or []
+                names = {r["tier"]: r["name"] for r in rank_assets}
 
                 def show(b):
                     return f"{names.get(b // 10, '?')} {b % 10}"
@@ -114,17 +140,24 @@ class Leaderboard(commands.Cog):
         board = [(owner[a], v) for a, v in board if interaction.guild.get_member(owner[a])]  # skip members who left
         if not board:
             return await interaction.followup.send("Nobody qualifies for that board yet.")
-        lines = [f"**{i}.** <@{m}> {show(v)}" for i, (m, v) in enumerate(board[:TOP], 1)]
-        me = next((i for i, (m, _) in enumerate(board) if m == interaction.user.id), None)
-        if me is not None and me >= TOP:
-            lines += ["...", f"**{me + 1}.** <@{board[me][0]}> {show(board[me][1])}"]
-
-        title = metric + (f" - {await self.bot.api.hero_name(hero_id)}" if hero_id else "")
-        foot = "Current rank" if metric == "Rank" else f"Last {WINDOW_DAYS} days, min {WINDOW_MIN_MATCHES} matches"
+        if metric == "Rank":
+            top_badge = board[0][1]
+            ctxs = {}
+            asset = next((r for r in rank_assets if r["tier"] == top_badge // 10), None)
+            thumb = ((asset or {}).get("images") or {}).get(f"small_subrank{top_badge % 10}")
+        else:
+            ctxs = {owner[a]: f"{g['matches']} match{'' if g['matches'] == 1 else 'es'}" for a, g in aggs.items()}
+            thumb = None
+        hero_info = None
+        if hero_id is not None:
+            h = heroes[hero_id]
+            hero_info = (h["name"], (h.get("colors") or {}).get("ui"))
+            thumb = (h.get("images") or {}).get("icon_image_small")
+        foot = "Current rank" if metric == "Rank" else f"Last {WINDOW_DAYS} days · min {WINDOW_MIN_MATCHES} matches"
         if failed:
-            foot += f" | {len(failed)} player(s) skipped: stats API error"
-        embed = discord.Embed(title=f"Leaderboard: {title}", description="\n".join(lines))
-        embed.set_footer(text=foot)
+            foot += f" · {len(failed)} player(s) skipped: stats API error"
+        rows = [(m, show(v), ctxs.get(m, "")) for m, v in board]
+        embed = board_embed(rows, metric, interaction.user.id, foot, hero_info, thumb)
         await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
 

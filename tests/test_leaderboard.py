@@ -1,6 +1,10 @@
 import unittest
 
+import discord
+
 from core.leaderboard_math import from_hero_stats, from_history, rank_board, rank_by_badge
+
+from cogs.leaderboard import board_embed
 
 
 def m(hero=1, k=5, d=0, a=5, t=1000, res=1, team=1, delta=10, dur=600, nw=6000):
@@ -35,6 +39,20 @@ class T(unittest.TestCase):
 
     def test_badge(self):
         self.assertEqual(rank_by_badge({"a": 101, "b": 0, "c": 111, "d": None}), [("c", 111), ("a", 101)])
+
+    def test_board_embed(self):
+        rows = [(i, f"{i}.0", f"{i} matches") for i in range(1, 31)]
+        e = board_embed(rows, "KDA", 15, "foot", ("Haze", [1, 2, 3]), "http://x/i.png")
+        lines = e.description.split("\n")
+        self.assertTrue(lines[0].startswith("🥇") and lines[2].startswith("🥉") and lines[3].startswith("**4.**"))
+        self.assertEqual(lines[-2:], ["…", "▶ **15.** <@15> · **15.0** · 15 matches"])
+        self.assertEqual((e.title, e.author.name, e.thumbnail.url), ("KDA · Haze", "Leaderboard · KDA · Haze", "http://x/i.png"))
+        self.assertEqual(e.color.to_rgb(), (1, 2, 3))
+        self.assertLessEqual(len(e.description), 1024)
+        self.assertLessEqual(len(e), 6000)
+        e = board_embed(rows[:3], "Rank", 2, "f")
+        self.assertIn("▶ 🥈", e.description)
+        self.assertEqual(e.color, discord.Color.gold())
 
 
 if __name__ == "__main__":

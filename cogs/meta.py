@@ -5,6 +5,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs._item_emojis import ItemEmojis
+from cogs._meta_heroes_embed import heroes_embed
+from cogs._meta_items_embed import items_embed
 from core.api import APIError
 from core.graphs import line_graph
 
@@ -24,26 +26,6 @@ _cache = {}
 
 def win_rate(wins, matches):
     return 100 * wins / matches if matches else 0.0
-
-
-def fmt_table(header, rows):
-    """Monospace table in a code block; first column left-aligned, the rest right-aligned."""
-    all_rows = [header] + rows
-    widths = [max(len(str(r[i])) for r in all_rows) for i in range(len(header))]
-    lines = []
-    for r in all_rows:
-        cells = [str(r[0]).ljust(widths[0])] + [str(c).rjust(w) for c, w in zip(r[1:], widths[1:])]
-        lines.append("  ".join(cells))
-    return "```\n" + "\n".join(lines) + "\n```"
-
-
-def fit_table(header, rows, limit=4000):
-    """Drop trailing rows until the table fits an embed description."""
-    text = fmt_table(header, rows)
-    while len(text) > limit and rows:
-        rows = rows[:-1]
-        text = fmt_table(header, rows)
-    return text
 
 
 def rank_by_wr(rows, wins_key, matches_key, min_matches):
@@ -148,16 +130,6 @@ class Meta(commands.Cog):
         _cache[key] = (time.time(), data)
         return data
 
-    async def item_names(self):
-        """{item_id: name} for shop items only; abilities and weapons share the asset list."""
-        hit = _cache.get("items")
-        if hit and time.time() - hit[0] < 6 * 3600:
-            return hit[1]
-        data = await self.bot.api.get("/v1/assets/items") or []
-        names = {i["id"]: i["name"] for i in data if i.get("type") == "upgrade"}
-        _cache["items"] = (time.time(), names)
-        return names
-
     async def hero_autocomplete(self, interaction, current):
         heroes = await self.bot.api.heroes()
         found = sorted((h for h in heroes.values() if current.lower() in h["name"].lower()), key=lambda h: h["name"])
@@ -184,15 +156,10 @@ class Meta(commands.Cog):
 
         async def build():
             rows = await self.fetch("/v1/analytics/hero-stats", min_average_badge=tier * 10 + 1 if tier else None)
-            names = await self.bot.api.heroes()
-            rows = [r for r in rows if r["hero_id"] in names]
-            total = sum(r["matches"] for r in rows) or 1
-            key = (lambda r: win_rate(r["wins"], r["matches"])) if sort.value == "win" else (lambda r: r["matches"])
-            rows.sort(key=key, reverse=True)
-            table = [(names[r["hero_id"]]["name"], f"{win_rate(r['wins'], r['matches']):.1f}%", f"{100 * r['matches'] / total:.1f}%", f"{r['matches']:,}") for r in rows]
-            title = f"Hero meta by {sort.name.lower()}" + (f" ({rank.name})" if tier else "")
-            embed = discord.Embed(title=title, description=fit_table(("Hero", "Win", "Pick", "Matches"), table), color=discord.Color.blurple())
-            return embed.set_footer(text=f"Last {DAYS} days. Pick = share of all hero picks.")
+            heroes = await self.bot.api.heroes()
+            rows = [r for r in rows if r["hero_id"] in heroes]
+            hero_emojis = {r["hero_id"]: await self.emojis.hero(heroes[r["hero_id"]]) for r in rows}
+            return heroes_embed(rows, heroes, hero_emojis, sort.value, rank.name if tier else None, DAYS)
 
         await self.run(interaction, build)
 
@@ -250,13 +217,11 @@ class Meta(commands.Cog):
             if hero is not None and hero not in heroes:
                 return discord.Embed(description="Unknown hero. Pick one from the list.", color=discord.Color.red())
             minimum = ITEM_MIN_HERO if hero else ITEM_MIN_ALL
-            names = await self.item_names()
+            item_assets = {i: a for i, a in (await self.bot.api.items()).items() if a.get("type") == "upgrade"}
             rows = await self.fetch("/v1/analytics/item-stats", hero_id=hero, min_matches=minimum)
-            rows = [r for r in rank_by_wr(rows, "wins", "matches", minimum) if r["item_id"] in names][:20]
-            table = [(names[r["item_id"]], f"{win_rate(r['wins'], r['matches']):.1f}%", f"{r['matches']:,}") for r in rows]
-            title = "Best items" + (f" for {heroes[hero]['name']}" if hero else "")
-            desc = fit_table(("Item", "Win", "Matches"), table) if table else "No items with enough matches."
-            return discord.Embed(title=title, description=desc, color=discord.Color.blurple()).set_footer(text=f"Last {DAYS} days, at least {minimum:,} matches")
+            rows = [r for r in rank_by_wr(rows, "wins", "matches", minimum) if r["item_id"] in item_assets][:20]
+            item_emojis = {r["item_id"]: await self.emojis.get(item_assets[r["item_id"]]) for r in rows}
+            return items_embed(rows, item_assets, item_emojis, heroes[hero] if hero else None, DAYS, minimum)
 
         await self.run(interaction, build)
 

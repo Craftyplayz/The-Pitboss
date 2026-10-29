@@ -87,27 +87,35 @@ class DueMatches(unittest.TestCase):
 
 
 class Embed(unittest.TestCase):
+    def member(self):
+        member = MagicMock(display_name="Bob")
+        member.display_avatar.url = "https://example.com/a.png"
+        return member
+
     def test_fields(self):
         match = m(9, 60, duration=1500, hero_id=1, player_team=0, match_result=0, player_kills=5,
-                  player_deaths=2, player_assists=7, net_worth=30000, ranked_delta=-300)
-        member = MagicMock(display_name="Bob")
-        member.display_avatar.url = "https://example.com/a.png"
-        e = build_embed(match, [match], {1: "Infernus"}, member)
-        self.assertEqual(e.title, "Infernus - Win")
+                  player_deaths=2, player_assists=7, net_worth=30000, ranked_delta=-300,
+                  hero_level=25, last_hits=100, denies=4)
+        heroes = {1: {"name": "Infernus", "images": {"icon_image_small": "https://x/i.png"}}}
+        e = build_embed(match, [match], heroes, self.member())
+        self.assertEqual(e.title, "Infernus · Win · 25:00")
+        self.assertEqual(e.thumbnail.url, "https://x/i.png")
+        self.assertEqual(e.author.icon_url, "https://example.com/a.png")
+        self.assertTrue(e.description.endswith("Full stats weren't available for this Match."))
         fields = {f.name: f.value for f in e.fields}
-        self.assertEqual(fields["K/D/A"], "5/2/7")
-        self.assertEqual(fields["Souls"], "30,000")
-        self.assertEqual(fields["Souls/min"], "1,200")
-        self.assertEqual(fields["Duration"], "25:00")
+        self.assertEqual(fields["K / D / A"], "5 / 2 / 7 · KDA 6.0")
+        self.assertEqual(fields["Souls"], "30,000 · 1,200/min")
+        self.assertEqual(fields["Level"], "25")
+        self.assertEqual(fields["Farm"], "100 LH · 4 DN")
         self.assertEqual(fields["Rank change"], "-300")
+        self.assertEqual(e.footer.text, "Match 9")
 
-    def test_no_rank_change_when_zero(self):
+    def test_no_rank_change_when_zero_and_unknown_hero(self):
         match = m(9, 60, hero_id=99, player_team=1, match_result=0, player_kills=0, player_deaths=0,
-                  player_assists=0, net_worth=0, ranked_delta=0)
-        member = MagicMock(display_name="Bob")
-        member.display_avatar.url = "https://example.com/a.png"
-        e = build_embed(match, [match], {}, member)
-        self.assertEqual(e.title, "Hero 99 - Loss")
+                  player_assists=0, net_worth=0, ranked_delta=0, hero_level=1, last_hits=0, denies=0)
+        e = build_embed(match, [match], {}, self.member())
+        self.assertEqual(e.title, "Hero 99 · Loss · 30:00")
+        self.assertIsNone(e.thumbnail.url)
         self.assertNotIn("Rank change", [f.name for f in e.fields])
 
 
