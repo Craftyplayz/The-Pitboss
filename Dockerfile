@@ -8,6 +8,7 @@ COPY cogs/ cogs/
 COPY core/ core/
 COPY mockups/ mockups/
 COPY pages/ pages/
+COPY static/ static/
 COPY assets/ assets/
 
 # unbuffered so logs show up in `docker logs` immediately

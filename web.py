@@ -14,6 +14,7 @@ from core.shared import window_start
 
 PORT = int(os.environ.get("WEB_PORT", 8642))
 ROOT = Path(__file__).parent
+ICON_LINKS = '<link rel="icon" href="/static/favicon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/static/pitboss-512.png">'
 DASHBOARD_TTL = 300  # seconds before the dashboard data is rebuilt from the API
 MATCH_TTL = 86400  # finished matches don't change
 ITEMS_TTL = 6 * 3600
@@ -26,7 +27,7 @@ def render_page(template, data):
 
 
 def empty_page(message):
-    return (f"<!doctype html><meta charset=utf-8><title>The Pitboss</title>"
+    return (f"<!doctype html><meta charset=utf-8><title>The Pitboss</title>{ICON_LINKS}"
             f"<body style='font:16px system-ui;background:#0f141b;color:#dbdee1;padding:24px'><p>{message}</p></body>")
 
 
@@ -167,6 +168,7 @@ def make_app():
     app.add_routes([web.get("/", index),
                     web.get("/api/match/{match_id:\\d+}", match_api),
                     web.get("/api/hero-items/{hero_id:\\d+}", hero_items_api),
+                    web.static("/static", ROOT / "static"),
                     web.get("/mockups", mockups_index),
                     web.static("/mockups", ROOT / "mockups")])
     return app
