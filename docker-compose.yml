@@ -10,5 +10,18 @@ services:
     volumes:
       - pitboss-data:/app/data
 
+  web:
+    build: .
+    command: ["python", "-u", "web.py"]
+    environment:
+      DEADLOCK_API_KEY: ${DEADLOCK_API_KEY:-}
+      WEB_PORT: 8642
+    # put a reverse proxy (with HTTPS) for deadlock.craftyplayz.com in front of this port
+    ports:
+      - "8642:8642"
+    restart: unless-stopped
+    volumes:
+      - pitboss-data:/app/data
+
 volumes:
   pitboss-data:
