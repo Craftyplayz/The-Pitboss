@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -196,7 +197,8 @@ def make_app():
     app["api"] = DeadlockAPI(os.environ.get("DEADLOCK_API_KEY") or None, log_path=Path(db_path).parent / "api-web.jsonl")
     app["log_dir"] = Path(db_path).parent  # both services' API call logs, read by /admin
     app["admin_password"] = os.environ.get("ADMIN_PASSWORD", "")
-    app["template"] = (ROOT / "pages" / "dashboard.html").read_text(encoding="utf8")
+    version = re.search(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(encoding="utf8"), re.M).group(1)
+    app["template"] = (ROOT / "pages" / "dashboard.html").read_text(encoding="utf8").replace("<!--VERSION-->", "v" + version, 1)
     app["cache"] = {}
 
     async def start(app):

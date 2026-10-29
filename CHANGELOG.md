@@ -2,6 +2,10 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+## 1.5.0.1
+
+- The website's sidebar now shows the bot's version under "Last 30 days".
+
 ## 1.5.0
 
 - New **Trophies** tab on the website: every trophy and tier, with how many players have reached each one and the %.
