@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pitboss Icons</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Cinzel:wght@700;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0f15;--card:#141a23;--line:#232c39;--tx:#dbdee1;--mu:#8792a2;--gold:#F0C35A}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px Inter,system-ui,sans-serif;padding:24px 16px}
+h1{font:700 24px Cinzel,serif;color:var(--gold);margin:0 0 4px}p.lead{color:var(--mu);margin:0 0 24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,520px),1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+.card h2{margin:0 0 2px;font:600 16px Inter}.card .d{color:var(--mu);font-size:13px;margin-bottom:14px}
+.row{display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap}
+.big svg{width:140px;height:140px;border-radius:28px;display:block}
+.circ{display:flex;gap:10px;align-items:flex-end}.circ svg{border-radius:50%;display:block}
+.lab{color:var(--mu);font-size:11px;text-align:center;margin-top:4px}
+.fav{display:flex;gap:10px;align-items:flex-end}.fav svg{display:block;image-rendering:auto}
+.mock{margin-top:14px;display:grid;gap:8px}
+.tab{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:8px 8px 0 0;width:220px;font-size:12px}
+.tab.dk{background:#35363a;color:#e8eaed}.tab.lt{background:#fff;color:#202124;border:1px solid #ddd;border-bottom:0}
+.tab svg{width:16px;height:16px;flex:none}.tab span{flex:1;overflow:hidden;white-space:nowrap}.tab i{font-style:normal;opacity:.6}
+.msg{display:flex;gap:10px;align-items:center;background:#313338;border-radius:8px;padding:10px 12px;font-size:13px}
+.msg svg{width:40px;height:40px;border-radius:50%;flex:none}.msg b{color:#fff}.msg .app{background:#5865f2;color:#fff;font-size:10px;font-weight:600;border-radius:4px;padding:1px 5px;margin-left:5px}
+.msg .t{color:#949ba4;font-size:11px;margin-left:6px}.msg .tx{color:#dbdee1;margin-top:2px}
+</style></head><body>
+<h1>The Pitboss — icon concepts</h1>
+<p class="lead">Each concept at full size, Discord's round crop (128 / 64 / 40 px), favicon sizes (32 / 16 px), a browser tab and a Discord message. Check the 16 px one: it decides whether an icon works as a favicon.</p>
+<div class="grid" id="grid"></div>
+<script>
+const G='#F0C35A',G2='#b8892f',BG='#10151d',T='#5fd4c8';
+const wrap=(inner,bg=BG)=>`<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><rect width="64" height="64" fill="${bg}"/>${inner}</svg>`;
+const flame=(x,y,s,c=T)=>`<path transform="translate(${x} ${y}) scale(${s})" d="M0-12C4-6 8-3 8 3A8 8 0 0 1-8 3C-8-2-4-4-4-8C-2-5-1-5 0-12Z" fill="${c}"/>`;
+const ICONS=[
+ ['Deco monogram','Gold serif P inside a double art-deco ring. Classic, reads clearly at every size.',
+  wrap(`<circle cx="32" cy="32" r="27" fill="none" stroke="${G}" stroke-width="2.5"/><circle cx="32" cy="32" r="22.5" fill="none" stroke="${G2}" stroke-width="1"/><text x="32" y="43" text-anchor="middle" font-family="Cinzel,serif" font-weight="900" font-size="31" fill="${G}">P</text>`)],
+ ['The fedora','A 1920s pit boss hat with a gold band: the boss watching the table.',
+  wrap(`<ellipse cx="32" cy="40" rx="25" ry="6" fill="${G2}"/><path d="M17 39C17 24 22 17 32 17C42 17 47 24 47 39Z" fill="${G}"/><path d="M27 18.5C30 22 34 22 37 18.5" fill="none" stroke="${G2}" stroke-width="2"/><rect x="17" y="31" width="30" height="5" fill="${BG}"/><rect x="17" y="32.5" width="30" height="2" fill="${T}"/>`)],
+ ['Soul chip','A casino chip with a soul flame in the middle: gambling meets Deadlock souls.',
+  wrap(`<circle cx="32" cy="32" r="28" fill="${G}"/>${[0,45,90,135,180,225,270,315].map(a=>`<rect x="29" y="4" width="6" height="8" rx="1" fill="${BG}" transform="rotate(${a} 32 32)"/>`).join('')}<circle cx="32" cy="32" r="19" fill="${BG}"/><circle cx="32" cy="32" r="19" fill="none" stroke="${G2}" stroke-width="1.5" stroke-dasharray="3 3"/>${flame(32,33,1.15)}`)],
+ ['The watcher','An occult eye inside a diamond: the pit boss sees every match.',
+  wrap(`<path d="M32 6L58 32L32 58L6 32Z" fill="none" stroke="${G}" stroke-width="3"/><path d="M14 32C20 23 26 20 32 20C38 20 44 23 50 32C44 41 38 44 32 44C26 44 20 41 14 32Z" fill="${G}"/><circle cx="32" cy="32" r="8" fill="${BG}"/><circle cx="32" cy="32" r="5" fill="${T}"/><circle cx="34" cy="30" r="1.6" fill="#fff"/>`)],
+ ['Soul spade','A gold spade with a soul wisp rising from it.',
+  wrap(`<path d="M32 11C26 21 13 27 13 38A9.5 9.5 0 0 0 29 45L26 54H38L35 45A9.5 9.5 0 0 0 51 38C51 27 38 21 32 11Z" fill="${G}"/>${flame(32,35,.75,BG)}`)],
+ ['Deco sunburst','Art-deco rays fanning behind a bold P, like a 1920s marquee.',
+  wrap(`<g stroke="${G2}" stroke-width="2.2">${[-70,-50,-30,-10,10,30,50,70].map(a=>`<line x1="32" y1="56" x2="${32+Math.sin(a*Math.PI/180)*44}" y2="${56-Math.cos(a*Math.PI/180)*44}"/>`).join('')}</g><path d="M10 56A22 22 0 0 1 54 56Z" fill="${BG}"/><path d="M10 56A22 22 0 0 1 54 56" fill="none" stroke="${G}" stroke-width="2.5"/><text x="32" y="54" text-anchor="middle" font-family="Cinzel,serif" font-weight="900" font-size="22" fill="${G}">P</text><rect x="4" y="56" width="56" height="3" fill="${G}"/>`)],
+ ['Soul orb','A glowing soul orb circled by a gold orbit. The most "Deadlock" of the set.',
+  `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="o" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#e6fffb"/><stop offset=".35" stop-color="${T}"/><stop offset="1" stop-color="#0d4f4a"/></radialGradient></defs><rect width="64" height="64" fill="${BG}"/><circle cx="32" cy="32" r="15" fill="url(#o)"/><ellipse cx="32" cy="32" rx="27" ry="10" fill="none" stroke="${G}" stroke-width="2.5" transform="rotate(-25 32 32)"/><circle cx="54" cy="21" r="3" fill="${G}"/></svg>`],
+ ['Loaded die','A gold die whose centre pip is a soul flame.',
+  wrap(`<rect x="10" y="10" width="44" height="44" rx="9" fill="${G}"/><rect x="10" y="10" width="44" height="44" rx="9" fill="none" stroke="${G2}" stroke-width="2"/>${[[21,21],[43,21],[21,43],[43,43]].map(([x,y])=>`<circle cx="${x}" cy="${y}" r="4" fill="${BG}"/>`).join('')}${flame(32,33.5,.7,BG)}`)],
+ ['Boss badge','A gold shield badge with a star: the house rules.',
+  wrap(`<path d="M32 6L54 13V30C54 44 44 53 32 58C20 53 10 44 10 30V13Z" fill="${G}"/><path d="M32 11L49 16.5V30C49 41 41 48.5 32 52.5C23 48.5 15 41 15 30V16.5Z" fill="${BG}"/><path d="M32 18L35.5 27H45L37.5 32.5L40.5 42L32 36L23.5 42L26.5 32.5L19 27H28.5Z" fill="${G}"/>`)],
+];
+const sized=(svg,w)=>svg.replace('<svg ',`<svg width="${w}" height="${w}" `);
+document.getElementById('grid').innerHTML=ICONS.map(([n,d,s],i)=>`<div class="card"><h2>${i+1}. ${n}</h2><div class="d">${d}</div>
+<div class="row"><div class="big">${s}</div>
+<div><div class="circ">${[128,64,40].map(w=>`<div>${sized(s,w)}<div class="lab">${w}</div></div>`).join('')}</div>
+<div class="fav" style="margin-top:12px">${[32,16].map(w=>`<div>${sized(s,w)}<div class="lab">${w}px</div></div>`).join('')}</div></div></div>
+<div class="mock"><div class="tab dk">${s}<span>The Pitboss</span><i>✕</i></div><div class="tab lt">${s}<span>The Pitboss</span><i>✕</i></div>
+<div class="msg">${s}<div><div><b>The PitBoss</b><span class="app">APP</span><span class="t">5:35 AM</span></div><div class="tx">Wraith · Loss · 38:30</div></div></div></div></div>`).join('');
+</script>
+</body></html>
