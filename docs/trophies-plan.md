@@ -44,7 +44,7 @@ Metadata stats get added to per-player totals in the database each time a Recap 
 
 | Family | Bronze | Silver | Gold | Platinum | Diamond |
 |---|---|---|---|---|---|
-| **Souls earned** | Pocket Change — 100k | Soul Collector — 1M | Soul Hoarder — 5M | Soul Baron — 10M | Soul Tycoon — 15M |
+| **Souls earned** | Pocket Change — 200k | Soul Collector — 2M | Soul Hoarder — 10M | Soul Baron — 20M | Soul Tycoon — 30M |
 
 ### Results
 
