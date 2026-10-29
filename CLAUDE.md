@@ -2,7 +2,7 @@
 
 ## Versions and patch notes
 
-Every commit gets a new version and an entry in [CHANGELOG.md](CHANGELOG.md). No exceptions, including docs, tests and typo fixes.
+Every commit gets a new version and an entry in [CHANGELOG.md](CHANGELOG.md), including docs, tests and typo fixes. The only exceptions: commits that only touch `mockups/` or the admin panel get no version bump and no changelog entry, so they never show in the Discord update log.
 
 Versions look like `1.A.B.C`. Bump exactly one part per commit and reset the parts after it to 0. Drop a trailing `.0` (write `1.5.0`, not `1.5.0.0`):
 
