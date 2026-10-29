@@ -9,7 +9,7 @@ from collections import defaultdict
 
 from core.match import final_build
 from core.shared import item_icon, won
-from core.trophies import FAMILIES, MASTERY, rarity
+from core.trophies import FAMILIES, MASTERY, META_FAMILIES, rarity
 
 # order matches the page's souls-by-source legend: lane creeps, neutrals, heroes, bosses, treasure, denies
 SOURCE_KEYS = ("gold_lane_creep", "gold_neutral_creep", "gold_player", "gold_boss", "gold_treasure", "gold_denied")
@@ -142,9 +142,15 @@ def hero_analytics(rows):
     return out
 
 
+def shop_items(items):
+    """Ids of the upgrades the shop sells now: what the Collector trophy counts toward."""
+    return sorted(i for i, it in items.items() if it.get("type") == "upgrade" and it.get("shopable"))
+
+
 def dashboard(now, players, histories, heroes, items, ranks, hero_rows, names):
     """The page's `D` object. players: entries from player_entry (None already dropped). names: {account_id: name}."""
     sm, per_day = server_matches(players, histories, now)
+    shop = shop_items(items)
     top = max(ranks) if ranks else 0
     rank_list = [[t, ranks[t]["name"], (ranks[t].get("images") or {}).get("large", "")] if t in ranks else [t, "", ""]
                  for t in range(top + 1)]
@@ -158,9 +164,11 @@ def dashboard(now, players, histories, heroes, items, ranks, hero_rows, names):
         "HA": hero_analytics(hero_rows),
         "TI": {},
         "N": {i: esc(n) for i, n in names.items()},
-        # trophy families: key -> [category, label, unit, tier names, thresholds, lower is better]
-        "TF": {k: [cat, label, unit, tiers, [len(heroes) if t is None else t for t in th], low]
-               for k, (cat, label, unit, tiers, th, _, low) in FAMILIES.items()},
+        # trophy families: key -> [category, label, unit, tier names, thresholds, lower is better, counts since Link only]
+        "TF": {k: [cat, label, unit, tiers, [(len(shop) if k == "collector" else len(heroes)) if t is None else t for t in th], low,
+                   k in META_FAMILIES]
+               for k, (cat, label, unit, tiers, th, _, low) in {**FAMILIES, **META_FAMILIES}.items()},
+        "SHOP": shop,
         "TM": MASTERY,
         "TR": rarity([p.get("tr", []) for p in players]),
     }

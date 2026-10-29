@@ -1,6 +1,6 @@
 # Trophies plan
 
-Status: the families match history can answer are live on the web dashboard (player profile card + `#players/<id>/trophies`, `core/trophies.py`). Not built yet: metadata families (damage, healing, items, kill style, MVP, multi-kill, accuracy, Collector), the Discord `/profile` section, `/trophies` and recap pings. Thresholds are based on a small sample of real matches. Check them against all Linked Members before building (see "Calibration").
+Status: every family is live on the web dashboard (player profile card + `#players/<id>/trophies`, `core/trophies.py`). Metadata families are filled by Match Recaps into the `match_stats` table. Not built yet: the Discord `/profile` section, `/trophies` and recap pings. Thresholds are based on a small sample of real matches. Check them against all Linked Members before building (see "Calibration").
 
 ## How trophies work
 

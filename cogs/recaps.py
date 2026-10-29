@@ -14,12 +14,15 @@ from cogs._recap_embed import build_full_embed
 from core.match import final_build, find_player, scoreboard, souls_sources, souls_timeline
 from core.recap_images import scoreboard_image, souls_image
 from core.shared import site_links, won
+from core.trophies import match_stats
 
 MAX_AGE = 24 * 3600  # a Match after the Link missed for longer than this gets no recap
 BACKFILL = 30 * 86400  # on link, Matches from this long before it get recaps too
 RECAPS_PER_RUN = 10  # per Member per loop run, so a backfill drips out instead of flooding Discord
 POST_DELAY = 2  # seconds between posts
 META_WAIT = 30 * 60  # how long a new Match waits for full metadata before getting the simple recap
+STATS_PER_RUN = 5  # trophy-stat metadata fetches per Member per loop run, so a backfill drips in
+NO_META_AFTER = 2 * 86400  # a Match still without metadata this long after it ended is saved as having none
 
 
 def match_end(match):
@@ -209,6 +212,19 @@ class Recaps(commands.Cog):
             db.update_link(self.bot.db, member.id, last_match_id=match["match_id"])
         if latest:
             await update_header(thread, *latest)
+        await self.save_stats(link, history, assets[1])
+
+    async def save_stats(self, link, history, items):
+        """Save trophy stats for Matches since the Link (and its Backfill) that recaps didn't already cover."""
+        saved = db.saved_match_ids(self.bot.db, link["account_id"])
+        todo = sorted((m for m in history if match_end(m) > link["linked_at"] - BACKFILL and m["match_id"] not in saved),
+                      key=lambda m: -m["match_id"])
+        for m in todo[:STATS_PER_RUN]:
+            meta = await self.bot.api.get(f"/v1/matches/{m['match_id']}/metadata")
+            stats = match_stats(meta, link["account_id"], items) if meta else None
+            if stats is None and time.time() - match_end(m) < NO_META_AFTER:
+                continue  # metadata can lag; try again next run
+            db.save_match_stats(self.bot.db, link["account_id"], m["match_id"], m["start_time"], stats)
 
     async def full_post(self, match, account_id, earlier, assets, member):
         """Send kwargs for the full recap with souls graph, or None if the Match metadata isn't available."""
@@ -221,7 +237,8 @@ class Recaps(commands.Cog):
         me = find_player(meta, account_id) if meta else None
         if me is None:
             return None
-        emojis = {i["id"]: await self.emojis.get(i) for i in final_build(me, items)}
+        db.save_match_stats(self.bot.db, account_id, match["match_id"], match["start_time"], match_stats(meta, account_id, items))
+        emojis ={i["id"]: await self.emojis.get(i) for i in final_build(me, items)}
         embed = build_full_embed(match, meta, account_id, earlier, heroes, items, ranks, emojis, member)
         embed.set_image(url="attachment://souls.png")
         players, hero_names = meta["match_info"]["players"], {i: h["name"] for i, h in heroes.items()}

@@ -1,7 +1,7 @@
-"""Trophies: tiers a Player earns from their full match history (docs/trophies-plan.md). Pure functions.
+"""Trophies: tiers a Player earns (docs/trophies-plan.md). Pure functions.
 
-Only the families match history can answer live here; the ones that need match metadata
-(damage, healing, items, kill style, MVP, multi-kills, accuracy) come later via Match Recaps.
+FAMILIES count the Player's full match history. META_FAMILIES need match metadata, so they count the
+match_stats rows Match Recaps save: Matches since the Link plus its Backfill.
 """
 from collections import Counter
 from itertools import accumulate
@@ -113,25 +113,91 @@ FAMILIES = {
 }
 
 
-def player_trophies(history, hero_count):
-    """(earned [[key, tier, unix time]], progress {key: current value}, hero ids won with).
-    Hero mastery keys are "h<hero_id>" and use MASTERY."""
+def _items_owned(rows):
+    seen = set()
+    for r in rows:
+        seen.update(r["items"])
+        yield len(seen)
+
+
+# Same shape as FAMILIES, but run over match_stats rows: Matches since the Link (plus its Backfill) only.
+# Collector's last threshold (None) is filled with the number of shop items.
+META_FAMILIES = {
+    "dmg": ("Combat", "Damage dealt", "", ["Scrapper", "Bruiser", "Heavy Hitter", "Wrecking Ball", "Demolisher", "Annihilator", "Cataclysm"],
+            [75_000, 250_000, 1_250_000, 2_500_000, 6_000_000, 12_500_000, 25_000_000], _total(lambda r: r["dmg"]), False),
+    "taken": ("Combat", "Damage taken", "", ["Punching Bag", "Tough Skin", "Thick Hide", "Iron Wall", "Juggernaut", "Unbreakable", "Immovable Object"],
+              [75_000, 275_000, 1_250_000, 2_750_000, 7_000_000, 12_500_000, 30_000_000], _total(lambda r: r["taken"]), False),
+    "heal": ("Combat", "Healing", "", ["Band-Aid", "Medic", "Field Surgeon", "Lifeline", "Miracle Worker", "Saint", "Fountain of Life"],
+             [20_000, 60_000, 300_000, 600_000, 1_500_000, 3_000_000, 6_500_000], _total(lambda r: r["heal"]), False),
+    "head": ("Kill style", "Headshot kills", "", ["Lucky Shot", "Crack Shot", "Marksman", "Deadeye", "Skull Splitter", "Sniper Elite", "One Tap"],
+             [1, 4, 20, 40, 100, 200, 400], _total(lambda r: r["head"]), False),
+    "melee": ("Kill style", "Melee kills", "", ["Scuffle", "Brawler", "Knuckle Sandwich", "Pugilist", "Heavyweight", "Fist of Fury", "Knockout King"],
+              [2, 8, 40, 80, 200, 400, 800], _total(lambda r: r["melee"]), False),
+    "abil": ("Kill style", "Ability kills", "", ["Cantrip", "Spellslinger", "Hexer", "Evoker", "Warlock", "Grand Warlock", "Arcane Executioner"],
+             [10, 35, 175, 350, 850, 1750, 3500], _total(lambda r: r["abil"]), False),
+    "mvp": ("Results", "MVP", "", ["Standout", "Star Player", "MVP", "Clutch", "Franchise Player", "Hall of Famer", "GOAT"],
+            [1, 3, 5, 10, 20, 40, 80], _total(lambda r: r["mvp"]), False),
+    "weapon": ("Items", "Weapon items bought", "", ["Armed", "Gunslinger", "Sharpshooter", "Arms Dealer", "Arsenal", "Walking Armory", "God of War"],
+               [15, 50, 250, 500, 1250, 2500, 5000], _total(lambda r: r["weapon"]), False),
+    "vitality": ("Items", "Vitality items bought", "", ["Healthy", "Hardy", "Sturdy", "Fortified", "Bulwark", "Immortal", "Living Fortress"],
+                 [15, 50, 250, 500, 1250, 2500, 5000], _total(lambda r: r["vitality"]), False),
+    "spirit": ("Items", "Spirit items bought", "", ["Spark", "Mystic", "Sorcerer", "Arcanist", "Archmage", "Spirit Lord", "Ascended"],
+               [15, 50, 250, 500, 1250, 2500, 5000], _total(lambda r: r["spirit"]), False),
+    "collector": ("Items", "Collector (different items)", "", ["Window Shopper", "Bargain Hunter", "Collector", "Hoarder", "The Whole Shop"],
+                  [10, 30, 60, 90, None], _items_owned, False),
+    "multi": ("Single match", "Multi-kill (≤10s apart)", "", ["Triple Kill", "Quad Kill", "Penta Kill", "Wipeout"],
+              [3, 4, 5, 6], _best(lambda r: r["multi"]), False),
+    "acc": ("Single match", "Accuracy (200+ shots)", "%", ["Steady Hand", "Precise", "Laser", "Aimbot?"],
+            [60, 65, 70, 75], _best(lambda r: round(100 * r["hit"] / r["shots"]) if r["shots"] >= 200 else 0), False),
+}
+
+MULTI_GAP = 10  # seconds allowed between kills in one multi-kill
+
+
+def match_stats(meta, account_id, items):
+    """The numbers META_FAMILIES need from one Match's metadata, or None if the Player isn't in it."""
+    players = meta["match_info"]["players"]
+    me = next((p for p in players if p["account_id"] == account_id), None)
+    if me is None:
+        return None
+    s = me["stats"][-1] if me["stats"] else {}
+    bought = [i["item_id"] for i in me["items"] if items.get(i["item_id"], {}).get("type") == "upgrade"]
+    slots = Counter(items[i].get("item_slot_type") for i in bought)
+    kills = sorted(d["game_time_s"] for p in players if p["team"] != me["team"]
+                   for d in p.get("death_details") or [] if d.get("killer_player_slot") == me["player_slot"])
+    multi = run = 0
+    for i, t in enumerate(kills):
+        run = run + 1 if i and t - kills[i - 1] <= MULTI_GAP else 1
+        multi = max(multi, run)
+    return {"dmg": s.get("player_damage", 0), "taken": s.get("player_damage_taken", 0), "heal": s.get("player_healing", 0),
+            "head": s.get("headshot_kills", 0), "melee": s.get("melee_kills", 0), "abil": s.get("ability_kills", 0),
+            "mvp": int(me.get("mvp_rank") == 1), "multi": multi,
+            "hit": s.get("shots_hit", 0), "shots": s.get("shots_hit", 0) + s.get("shots_missed", 0),
+            "weapon": slots["weapon"], "vitality": slots["vitality"], "spirit": slots["spirit"], "items": sorted(set(bought))}
+
+
+def player_trophies(history, stats, hero_count, item_count):
+    """(earned [[key, tier, unix time]], progress {key: current value}, hero ids won with, item ids bought).
+    history: match-history entries; stats: match_stats dicts plus "start_time". Hero mastery keys are
+    "h<hero_id>" and use MASTERY."""
     ms = sorted(history, key=lambda m: m["start_time"])
-    runs = [(k, f[4], f[5], f[6]) for k, f in FAMILIES.items()]
-    runs += [(f"h{h}", MASTERY[1], _total(lambda m, h=h: m["hero_id"] == h), False)
+    rows = sorted(stats, key=lambda r: r["start_time"])
+    runs = [(k, f[4], f[5], f[6], ms, hero_count) for k, f in FAMILIES.items()]
+    runs += [(k, f[4], f[5], f[6], rows, item_count) for k, f in META_FAMILIES.items()]
+    runs += [(f"h{h}", MASTERY[1], _total(lambda m, h=h: int(m["hero_id"] == h)), False, ms, None)
              for h in sorted({m["hero_id"] for m in ms})]
     got, progress = [], {}
-    for key, thresholds, run, low in runs:
-        values = list(run(ms))
+    for key, thresholds, run, low, src, everything in runs:
+        values = list(run(src))
         for tier, t in enumerate(thresholds):
-            t = hero_count if t is None else t
+            t = everything if t is None else t
             i = next((i for i, v in enumerate(values) if v is not None and (v <= t if low else v >= t)), None)
             if i is None:
                 break
-            got.append([key, tier, ms[i]["start_time"]])
+            got.append([key, tier, src[i]["start_time"]])
         last = values[-1] if values else None
         progress[key] = round(last, 1) if isinstance(last, float) else last
-    return got, progress, sorted({m["hero_id"] for m in ms if won(m)})
+    return got, progress, sorted({m["hero_id"] for m in ms if won(m)}), sorted({i for r in rows for i in r["items"]})
 
 
 def rarity(earned_by_player):

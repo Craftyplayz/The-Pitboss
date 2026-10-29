@@ -88,11 +88,13 @@ async def build_dashboard(app):
                                  [r for r in hero_stats if r["account_id"] == a], mates[a], enemies[a], linked, profiles)
                for a in ids]
     players = [p for p in players if p]  # shortcut: Linked Players with no match in 30 days are left off the page
-    heroes, full = await api.heroes(), dict(zip(ids, results[4:4 + n]))
+    heroes, items, full = await api.heroes(), await api.items(), dict(zip(ids, results[4:4 + n]))
+    shop = dash.shop_items(items)
     for p in players:  # trophies count every match, not just the 30-day window
-        p["tr"], p["tp"], p["tw"] = player_trophies(full[p["id"]], len(heroes))
+        p["tr"], p["tp"], p["tw"], p["ti"] = player_trophies(full[p["id"]], db.match_stats(app["db"], p["id"]),
+                                                             len(heroes), len(shop))
     names = {i: p["personaname"] for i, p in profiles.items() if i not in linked}
-    return dash.dashboard(now, players, histories, heroes, await api.items(), await api.ranks(), hero_rows, names)
+    return dash.dashboard(now, players, histories, heroes, items, await api.ranks(), hero_rows, names)
 
 
 async def dashboard_data(app):

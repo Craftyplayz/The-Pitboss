@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -26,6 +27,13 @@ CREATE TABLE IF NOT EXISTS scrims (
     lobby_at   INTEGER,        -- when the current lobby code was made
     match_id   INTEGER,
     detail     TEXT            -- JSON scoreboard (core.dashboard.match_detail) once the Match is over
+);
+CREATE TABLE IF NOT EXISTS match_stats (
+    account_id INTEGER NOT NULL,
+    match_id   INTEGER NOT NULL,
+    start_time INTEGER NOT NULL,
+    stats      TEXT,           -- JSON from core.trophies.match_stats; NULL when the API never had metadata
+    PRIMARY KEY (account_id, match_id)
 );
 CREATE TABLE IF NOT EXISTS scrim_players (
     scrim_id  INTEGER NOT NULL,
@@ -90,6 +98,23 @@ def update_link(conn, member_id, **fields):
     cols = ", ".join(f"{k} = ?" for k in fields)
     with conn:
         conn.execute(f"UPDATE links SET {cols} WHERE member_id = ?", (*fields.values(), member_id))
+
+
+def save_match_stats(conn, account_id, match_id, start_time, stats):
+    """stats: dict, or None to mark a Match whose metadata never showed up. The first save wins."""
+    with conn:
+        conn.execute("INSERT OR IGNORE INTO match_stats (account_id, match_id, start_time, stats) VALUES (?, ?, ?, ?)",
+                     (account_id, match_id, start_time, None if stats is None else json.dumps(stats)))
+
+
+def saved_match_ids(conn, account_id):
+    return {r[0] for r in conn.execute("SELECT match_id FROM match_stats WHERE account_id = ?", (account_id,))}
+
+
+def match_stats(conn, account_id):
+    """[stats dict with "start_time"] for every saved Match that had metadata."""
+    return [{**json.loads(r["stats"]), "start_time": r["start_time"]} for r in conn.execute(
+        "SELECT start_time, stats FROM match_stats WHERE account_id = ? AND stats IS NOT NULL", (account_id,))]
 
 
 def create_scrim(conn, creator_id, created_at):
