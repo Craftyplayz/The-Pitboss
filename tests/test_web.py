@@ -4,7 +4,7 @@ import unittest
 from core.dashboard import hero_analytics, hero_items, item_info, match_detail, player_entry, server_matches
 from tests.test_recap_embed import ITEMS, META
 from core.shared import item_icon
-from web import render_page
+from web import hero_items_api, render_page
 
 NOW = 1_800_000_000
 
@@ -92,6 +92,40 @@ class Dashboard(unittest.TestCase):
         self.assertEqual(page.count("</script>"), 1)
         payload = page[len("<script>const D="):-len(";</script>")]
         self.assertEqual(json.loads(payload)["n"], "</script><script>alert(1)</script>")
+
+
+class HeroItemsScope(unittest.IsolatedAsyncioTestCase):
+    async def fetch(self, query):
+        calls = []
+
+        class API:
+            async def heroes(self):
+                return {1: {}}
+
+            async def items(self):
+                return ITEMS
+
+            async def get(self, path, **params):
+                calls.append(params)
+                return []
+
+        class Links:
+            def execute(self, *_):
+                return self
+
+            def fetchall(self):
+                return [{"account_id": 55}, {"account_id": 66}]
+
+        request = type("R", (), {"match_info": {"hero_id": "1"}, "query": query,
+                                 "app": {"api": API(), "db": Links(), "cache": {}}})()
+        await hero_items_api(request)
+        return calls[0]
+
+    async def test_server_is_default_and_filters_linked_players(self):
+        self.assertEqual((await self.fetch({}))["account_ids"], "55,66")
+
+    async def test_global_has_no_account_filter(self):
+        self.assertNotIn("account_ids", await self.fetch({"scope": "global"}))
 
 
 if __name__ == "__main__":

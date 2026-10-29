@@ -134,11 +134,21 @@ async def hero_items_api(request):
     if hero_id not in await api.heroes():
         raise web.HTTPNotFound()
 
+    # server (default): only Linked Players' buys over the Leaderboard Window; global: everyone, last 14 days
+    server = request.query.get("scope") != "global"
+
     async def make():
-        rows = await api.get("/v1/analytics/item-stats", hero_id=hero_id, min_unix_timestamp=int(time.time()) - 14 * 86400)
+        if server:
+            ids = ",".join(str(l["account_id"]) for l in db.all_links(request.app["db"]))
+            if not ids:
+                return []
+            rows = await api.get("/v1/analytics/item-stats", hero_id=hero_id, account_ids=ids, min_unix_timestamp=window_start())
+        else:
+            rows = await api.get("/v1/analytics/item-stats", hero_id=hero_id, min_unix_timestamp=int(time.time()) - 14 * 86400)
         return dash.hero_items(rows or [], await api.items())
 
-    return web.json_response(await cached(request.app, f"items:{hero_id}", ITEMS_TTL, make))
+    key = f"items:{'server' if server else 'global'}:{hero_id}"
+    return web.json_response(await cached(request.app, key, ITEMS_TTL, make))
 
 
 async def mockups_index(request):
