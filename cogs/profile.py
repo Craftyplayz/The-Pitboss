@@ -54,7 +54,7 @@ class Profile(commands.Cog):
         window = [m for m in history or [] if m["start_time"] >= since]
         linked = {r["account_id"]: r["member_id"] for r in db.all_links(self.bot.db)}
 
-        embed = build_profile_embed(member, (steam or [None])[0], rank_text, rank_icon, window,
+        embed = build_profile_embed(member, aid, (steam or [None])[0], rank_text, rank_icon, window,
                                     hero_stats or [], mates, names, linked, heroes)
         graph = trend(window, ranked=bool(badge))
         if graph is None:

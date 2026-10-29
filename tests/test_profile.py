@@ -64,8 +64,10 @@ class Profile(unittest.TestCase):
     def test_embed(self):
         hist = [m(i, i % 3 != 0) for i in range(1, 13)]
         steam = {"personaname": "Ravenye", "profileurl": "https://s/r", "countrycode": "AU", "avatarmedium": "https://a"}
-        e = build_profile_embed(member(), steam, "Unranked", None, hist, HS, [], {}, {}, HEROES)
-        self.assertEqual(e.title, "Ravenye's Profile")
+        e = build_profile_embed(member(), 55, steam, "Unranked", None, hist, HS, [], {}, {}, HEROES)
+        self.assertIsNone(e.title)
+        self.assertEqual(e.author.name, "Ravenye · AU")
+        self.assertTrue(e.author.url.endswith("/#players/55"))
         self.assertEqual(e.thumbnail.url, "https://x/drifter.png")
         names = [f.name for f in e.fields]
         self.assertIn("Top heroes", names)
@@ -74,7 +76,7 @@ class Profile(unittest.TestCase):
         self.assertLessEqual(len(e), 6000)
 
     def test_embed_no_matches(self):
-        e = build_profile_embed(member(), None, "Ascendant 1", "https://r", [], [], [], {}, {}, HEROES)
+        e = build_profile_embed(member(), 55, None, "Ascendant 1", "https://r", [], [], [], {}, {}, HEROES)
         self.assertIn("No Matches", e.description)
         self.assertEqual(e.thumbnail.url, "https://r")
         self.assertEqual(e.fields, [])

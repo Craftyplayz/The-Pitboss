@@ -4,7 +4,7 @@ import time
 import discord
 
 from core.insights import profile_insights
-from core.shared import WINDOW_DAYS, won
+from core.shared import SITE_URL, WINDOW_DAYS, won
 
 ROLL = 10  # Matches in the rolling win rate
 TOP_HEROES = 5
@@ -107,14 +107,14 @@ def trend(history, ranked):
         x_ticks=ticks, y_range=(0, 100), midline=50, y_label=lambda v: f"{v}%")
 
 
-def build_profile_embed(member, steam, rank_text, rank_icon, history, hero_stats, mates, mate_names, linked, heroes):
+def build_profile_embed(member, account_id, steam, rank_text, rank_icon, history, hero_stats, mates, mate_names, linked, heroes):
     """steam: /players/steam entry or None. history: match-history entries in the window. hero_stats: window rows."""
     hero_names = {i: h["name"] for i, h in heroes.items()}
     name = steam["personaname"] if steam else "Unknown player"
-    url = steam.get("profileurl") if steam else None
-    embed = discord.Embed(title=f"{name}'s Profile", url=url, color=discord.Color.gold())
+    embed = discord.Embed(color=discord.Color.gold())
     country = f" · {steam['countrycode']}" if steam and steam.get("countrycode") else ""
-    embed.set_author(name=f"{name}{country}", icon_url=steam.get("avatarmedium") if steam else None, url=url)
+    embed.set_author(name=f"{name}{country}", icon_url=steam.get("avatarmedium") if steam else None,
+                     url=f"{SITE_URL}/#players/{account_id}")
 
     lines = [f"Linked to {member.mention} · {rank_text}"]
     if not history:
