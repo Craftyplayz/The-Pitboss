@@ -2,6 +2,8 @@
 import aiohttp
 import discord
 
+from core.shared import item_icon
+
 
 class ItemEmojis:
     def __init__(self, bot):
@@ -14,7 +16,7 @@ class ItemEmojis:
             self.by_name = {e.name: str(e) for e in await self.bot.fetch_application_emojis()}
         name = f"i{item['id']}"
         if name not in self.by_name:
-            url = item.get("shop_image_small") or item.get("image")
+            url = item_icon(item)
             if not url:
                 return ""
             try:

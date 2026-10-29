@@ -3,6 +3,7 @@ import unittest
 
 from core.dashboard import hero_analytics, hero_items, match_detail, player_entry, server_matches
 from tests.test_recap_embed import ITEMS, META
+from core.shared import item_icon
 from web import render_page
 
 NOW = 1_800_000_000
@@ -66,6 +67,11 @@ class Dashboard(unittest.TestCase):
         rows = [{"item_id": 10, "matches": 5, "wins": 4}, {"item_id": 11, "matches": 9, "wins": 3},
                 {"item_id": 12, "matches": 99, "wins": 50}]
         self.assertEqual(hero_items(rows, ITEMS), [[11, 9, 33.3], [10, 5, 80.0]])
+
+    def test_item_icon_falls_back_to_shop_image(self):
+        self.assertEqual(item_icon({"image": "a.png", "shop_image": "b.png"}), "a.png")
+        self.assertEqual(item_icon({"shop_image": "b.png"}), "b.png")  # e.g. Stalker
+        self.assertEqual(item_icon({}), "")
 
     def test_render_page_cannot_close_script(self):
         page = render_page("<script>const D=/*DATA*/null;</script>", {"n": "</script><script>alert(1)</script>"})

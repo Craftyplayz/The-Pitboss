@@ -19,6 +19,11 @@ def site_links(account_id, match_id, hero_id):
             "leaderboards": f"{SITE_URL}/#leaderboards"}
 
 
+def item_icon(item):
+    """An item asset's icon URL. Some upgrades (e.g. Stalker, Spellslinger) only have a shop_image."""
+    return item.get("image") or item.get("shop_image") or ""
+
+
 def won(match):
     """True if the Player won this match-history entry."""
     return match["match_result"] == match["player_team"]

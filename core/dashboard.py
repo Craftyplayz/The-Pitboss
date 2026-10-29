@@ -7,7 +7,7 @@ import html
 from collections import defaultdict
 
 from core.match import final_build
-from core.shared import won
+from core.shared import item_icon, won
 
 # order matches the page's souls-by-source legend: lane creeps, neutrals, heroes, bosses, treasure, denies
 SOURCE_KEYS = ("gold_lane_creep", "gold_neutral_creep", "gold_player", "gold_boss", "gold_treasure", "gold_denied")
@@ -127,7 +127,7 @@ def dashboard(now, players, histories, heroes, items, ranks, hero_rows, names):
                  for t in range(top + 1)]
     return {
         "T": now, "P": players, "SM": sm, "days": per_day, "total": len(sm), "MM": [],
-        "IT": {i: [it["name"], it.get("image") or "", it.get("item_slot_type") or "", it.get("cost") or 0, it.get("item_tier") or 0]
+        "IT": {i: [it["name"], item_icon(it), it.get("item_slot_type") or "", it.get("cost") or 0, it.get("item_tier") or 0]
                for i, it in items.items() if it.get("type") == "upgrade"},
         "H": {i: [h["name"], (h.get("images") or {}).get("icon_image_small", "")] for i, h in heroes.items()},
         "R": rank_list,
