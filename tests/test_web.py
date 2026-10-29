@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from core.dashboard import hero_analytics, hero_items, match_detail, player_entry, server_matches
+from core.dashboard import hero_analytics, hero_items, item_info, match_detail, player_entry, server_matches
 from tests.test_recap_embed import ITEMS, META
 from core.shared import item_icon
 from web import render_page
@@ -67,6 +67,20 @@ class Dashboard(unittest.TestCase):
         rows = [{"item_id": 10, "matches": 5, "wins": 4}, {"item_id": 11, "matches": 9, "wins": 3},
                 {"item_id": 12, "matches": 99, "wins": 50}]
         self.assertEqual(hero_items(rows, ITEMS), [[11, 9, 33.3], [10, 5, 80.0]])
+
+    def test_item_info(self):
+        item = {"description": {"desc": 'Apply a <span class="highlight">Stun</span><svg><path/></svg>.<br>Isn\'t <b>safe</b>'},
+                "is_active_item": True,
+                "tooltip_sections": [{"section_attributes": [{"properties": ["Health", "Zero", "Unlabelled"]},
+                                                             {"elevated_properties": ["Range"]}]}],
+                "properties": {"Health": {"value": "75", "label": "Bonus Health", "prefix": "{s:sign}"},
+                               "Zero": {"value": "0", "label": "Nothing"},
+                               "Unlabelled": {"value": "3"},
+                               "Range": {"value": "45m", "label": "Cast Range", "postfix": "m"},
+                               "AbilityCooldown": {"value": "-35", "label": "Cooldown", "prefix": "+", "postfix": "s"}}}
+        self.assertEqual(item_info(item), ["Apply a Stun.\nIsn&#x27;t safe",
+                                           [["Bonus Health", "+75"], ["Cast Range", "45m"], ["Cooldown", "-35s"]]])
+        self.assertEqual(item_info({}), ["", []])
 
     def test_item_icon_falls_back_to_shop_image(self):
         self.assertEqual(item_icon({"image": "a.png", "shop_image": "b.png"}), "a.png")

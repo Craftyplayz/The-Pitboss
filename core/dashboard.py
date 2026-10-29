@@ -4,6 +4,7 @@ Every string that comes from Steam (names, avatar URLs) is HTML-escaped, because
 writes these values straight into innerHTML.
 """
 import html
+import re
 from collections import defaultdict
 
 from core.match import final_build
@@ -25,6 +26,27 @@ def _weighted(rows, key, weight="time_played"):
 def _acc(value):
     """hero-stats accuracy is a 0-1 fraction."""
     return round(value * 100) if value <= 1 else round(value)
+
+
+def item_info(item):
+    """[description, [[label, value], ...]] for the page's item popup; the API's text is HTML, so it is flattened and escaped."""
+    desc = " ".join((item.get("description") or {}).values())
+    desc = re.sub(r"\s+", " ", re.sub(r"<svg.*?</svg>", "", desc, flags=re.S))
+    desc = re.sub(r"<[^>]+>", lambda m: "\n" if m.group().startswith("<br") else "", desc)
+    props = item.get("properties") or {}
+    names = [n for s in item.get("tooltip_sections") or [] for a in s.get("section_attributes") or []
+             for k in ("properties", "elevated_properties", "important_properties") for n in a.get(k) or []]
+    if item.get("is_active_item"):
+        names.append("AbilityCooldown")
+    stats = []
+    for n in dict.fromkeys(names):
+        p = props.get(n) or {}
+        v = str(p.get("value", "")).removesuffix((p.get("postfix") or "").strip())
+        if not p.get("label") or v in ("", "0"):
+            continue
+        sign = "+" if p.get("prefix") in ("+", "{s:sign}") and not v.startswith("-") else ""
+        stats.append([esc(p["label"]), esc(f"{sign}{v}{p.get('postfix') or ''}")])
+    return [esc(re.sub(r" *\n *", "\n", desc).strip()), stats]
 
 
 PEOPLE_SHOWN = 6  # mates / rivals listed per Player
@@ -127,7 +149,8 @@ def dashboard(now, players, histories, heroes, items, ranks, hero_rows, names):
                  for t in range(top + 1)]
     return {
         "T": now, "P": players, "SM": sm, "days": per_day, "total": len(sm), "MM": [],
-        "IT": {i: [it["name"], item_icon(it), it.get("item_slot_type") or "", it.get("cost") or 0, it.get("item_tier") or 0]
+        "IT": {i: [it["name"], item_icon(it), it.get("item_slot_type") or "", it.get("cost") or 0, it.get("item_tier") or 0,
+                   *item_info(it)]
                for i, it in items.items() if it.get("type") == "upgrade"},
         "H": {i: [h["name"], (h.get("images") or {}).get("icon_image_small", "")] for i, h in heroes.items()},
         "R": rank_list,
