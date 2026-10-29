@@ -13,6 +13,7 @@ from core import dashboard as dash
 from core import db
 from core.api import APIError, DeadlockAPI
 from core.shared import window_start
+from core.trophies import player_trophies
 
 PORT = int(os.environ.get("WEB_PORT", 8642))
 ROOT = Path(__file__).parent
@@ -87,8 +88,11 @@ async def build_dashboard(app):
                                  [r for r in hero_stats if r["account_id"] == a], mates[a], enemies[a], linked, profiles)
                for a in ids]
     players = [p for p in players if p]  # shortcut: Linked Players with no match in 30 days are left off the page
+    heroes, full = await api.heroes(), dict(zip(ids, results[4:4 + n]))
+    for p in players:  # trophies count every match, not just the 30-day window
+        p["tr"], p["tp"], p["tw"] = player_trophies(full[p["id"]], len(heroes))
     names = {i: p["personaname"] for i, p in profiles.items() if i not in linked}
-    return dash.dashboard(now, players, histories, await api.heroes(), await api.items(), await api.ranks(), hero_rows, names)
+    return dash.dashboard(now, players, histories, heroes, await api.items(), await api.ranks(), hero_rows, names)
 
 
 async def dashboard_data(app):

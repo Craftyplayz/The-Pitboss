@@ -9,6 +9,7 @@ from collections import defaultdict
 
 from core.match import final_build
 from core.shared import item_icon, won
+from core.trophies import FAMILIES, MASTERY, rarity
 
 # order matches the page's souls-by-source legend: lane creeps, neutrals, heroes, bosses, treasure, denies
 SOURCE_KEYS = ("gold_lane_creep", "gold_neutral_creep", "gold_player", "gold_boss", "gold_treasure", "gold_denied")
@@ -157,6 +158,11 @@ def dashboard(now, players, histories, heroes, items, ranks, hero_rows, names):
         "HA": hero_analytics(hero_rows),
         "TI": {},
         "N": {i: esc(n) for i, n in names.items()},
+        # trophy families: key -> [category, label, unit, tier names, thresholds, lower is better]
+        "TF": {k: [cat, label, unit, tiers, [len(heroes) if t is None else t for t in th], low]
+               for k, (cat, label, unit, tiers, th, _, low) in FAMILIES.items()},
+        "TM": MASTERY,
+        "TR": rarity([p.get("tr", []) for p in players]),
     }
 
 
