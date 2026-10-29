@@ -149,8 +149,11 @@ const streak=p=>{let s=0;const l=p.form[p.form.length-1];for(let i=p.form.length
 const stk=p=>{const [l,s]=streak(p);return `<span class="pill ${l?'pw':'pl'}">${l?'W':'L'}${s}</span>`};
 const flt=i=>{const q=i.value.toLowerCase();i.closest('.lp').querySelectorAll('.li').forEach(e=>e.style.display=e.textContent.toLowerCase().includes(q)?'':'none')};
 function split(t,title,sub,list,detail,det){const el=$('v-'+t),o=el.querySelector('.lp'),sc=o?o.scrollTop:0;
+ // same item re-rendered (e.g. another player in the same match): keep the detail scroll; a new item starts at the top
+ const key=location.hash.split('/').slice(0,2).join('/'),same=el.dataset.k===key,od=el.querySelector('.dp'),dsc=od?od.scrollTop:0,wsc=scrollY;el.dataset.k=key;
  el.innerHTML=`<div class="split ${det?'det':''}"><div class="lp"><div class="lh"><h1 style="font-size:18px">${title}</h1><p>${sub}</p><input placeholder="Filter…" oninput="flt(this)"></div>${list}</div><div class="dp"><a class="bk" href="#${t}">← Back to list</a>${detail}</div></div>`;
- const n=el.querySelector('.lp');n.scrollTop=sc;const s=n.querySelector('.li.sel');if(s&&!sc)s.scrollIntoView({block:'nearest'})}
+ const n=el.querySelector('.lp');n.scrollTop=sc;const s=n.querySelector('.li.sel');if(s&&!sc)s.scrollIntoView({block:'nearest'});
+ if(same){el.querySelector('.dp').scrollTop=dsc;scrollTo(0,wsc)}}
 /* ---------- OVERVIEW ---------- */
 function overview(){
  const top=ranked[0],mh=HL[0],gs=P.flatMap(p=>p.g.map(g=>({p,g}))),avgLen=avg(D.SM.map(m=>m.dur));
