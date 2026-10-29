@@ -8,6 +8,7 @@ from discord.ext import commands
 from core import db
 
 CHANGELOG = Path(__file__).parent.parent / "CHANGELOG.md"
+BEFORE_UPDATES = "1.4.0"  # the last version without this cog
 LIMIT = 4000  # embed descriptions max out at 4096
 SECTION_RE = re.compile(r"^## (\S+).*$", re.M)
 
@@ -45,10 +46,8 @@ class Updates(commands.Cog):
             return
         self.done = True
         text = CHANGELOG.read_text(encoding="utf8")
-        last = db.get_setting(self.bot.db, "bot_version")
-        if last is None:  # first start with this feature: nothing to compare with
-            db.set_setting(self.bot.db, "bot_version", sections(text)[0][0])
-            return
+        # no version saved yet means the bot was last run before Bot Updates existed
+        last = db.get_setting(self.bot.db, "bot_version") or BEFORE_UPDATES
         if not (found := changes_since(text, last)):
             return
         channel_id = db.get_setting(self.bot.db, "bot_updates_id")
