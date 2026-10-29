@@ -145,8 +145,10 @@ async def api_errors(request, handler):
 
 def make_app():
     app = web.Application(middlewares=[api_errors])
-    app["db"] = db.connect(os.environ.get("DB_PATH", "data/pitboss.db"))
-    app["api"] = DeadlockAPI(os.environ.get("DEADLOCK_API_KEY") or None)
+    db_path = os.environ.get("DB_PATH", "data/pitboss.db")
+    app["db"] = db.connect(db_path)
+    # every API call, forever, one JSON line each; next to the database so it lives on the data volume
+    app["api"] = DeadlockAPI(os.environ.get("DEADLOCK_API_KEY") or None, log_path=Path(db_path).parent / "api-web.jsonl")
     app["template"] = (ROOT / "pages" / "dashboard.html").read_text(encoding="utf8")
     app["cache"] = {}
 

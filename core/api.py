@@ -1,3 +1,6 @@
+import json
+import time
+
 import aiohttp
 
 BASE_URL = "https://api.deadlock-api.com"
@@ -8,8 +11,9 @@ class APIError(Exception):
 
 
 class DeadlockAPI:
-    def __init__(self, key=None):
+    def __init__(self, key=None, log_path=None):
         self.key = key
+        self.log_path = log_path
         self.session = None
         self._heroes = None
         self._items = None
@@ -25,20 +29,38 @@ class DeadlockAPI:
         if self.session:
             await self.session.close()
 
+    def log(self, url, params, status, started, size):
+        """Append one API call to the log file as a JSON line. Never raises: logging must not break a request."""
+        if not self.log_path:
+            return
+        line = json.dumps({"t": round(time.time()), "url": url, "params": params, "status": status,
+                           "ms": round((time.monotonic() - started) * 1000), "bytes": size}, separators=(",", ":"))
+        try:
+            with open(self.log_path, "a", encoding="utf8") as f:
+                f.write(line + "\n")
+        except OSError as e:
+            print(f"api log: {e}")
+
     async def get(self, path, **params):
         """GET a path like "/v1/players/123/rank" and return parsed JSON. Returns None on 404."""
         params = {k: str(v).lower() if isinstance(v, bool) else v for k, v in params.items() if v is not None}
+        started, status, size = time.monotonic(), "error", 0
         try:
             async with self.session.get(path, params=params) as resp:
+                status = resp.status
+                body = await resp.read()
+                size = len(body)
                 if resp.status == 404:
                     return None
                 if resp.status in (429, 503, 504):
                     raise APIError("The Deadlock stats API is busy. Try again in a minute.")
                 if resp.status >= 400:
                     raise APIError(f"The Deadlock stats API returned an error ({resp.status}).")
-                return await resp.json()
+                return json.loads(body)
         except (aiohttp.ClientError, TimeoutError) as e:
             raise APIError("Couldn't reach the Deadlock stats API.") from e
+        finally:
+            self.log(path, params, status, started, size)
 
     async def heroes(self):
         """{hero_id: hero asset dict} for selectable heroes. Cached until restart."""
