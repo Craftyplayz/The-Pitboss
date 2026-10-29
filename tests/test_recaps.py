@@ -180,5 +180,44 @@ class CheckMember(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cog.tasks, set())
 
 
+class LatestHeader(unittest.IsolatedAsyncioTestCase):
+    def test_post_title(self):
+        from cogs.recaps import post_title
+        self.assertEqual(post_title({"embeds": [discord.Embed(title="Violet · Loss · 29:13"), discord.Embed()]}), "Violet · Loss · 29:13")
+        self.assertEqual(post_title({"embed": discord.Embed(title="Haze · Win · 30:00")}), "Haze · Win · 30:00")
+        self.assertEqual(post_title({"embed": discord.Embed()}), "Match")
+
+    async def test_header_text_and_jump_button(self):
+        from unittest.mock import AsyncMock, patch
+        from cogs.recaps import LATEST_LABEL, update_header
+        thread, first, latest = MagicMock(id=1), AsyncMock(), MagicMock(id=9, jump_url="https://discord.com/channels/1/1/9")
+        thread.fetch_message = AsyncMock(return_value=first)
+        old = discord.ui.View(timeout=None)
+        old.add_item(discord.ui.Button(label="The Pitboss", url="https://site/"))
+        old.add_item(discord.ui.Button(label=LATEST_LABEL, url="https://discord.com/channels/1/1/5"))
+        with patch.object(discord.ui.View, "from_message", return_value=old):
+            await update_header(thread, latest, "Violet · Loss · 29:13")
+        kwargs = first.edit.await_args.kwargs
+        self.assertEqual(set(kwargs), {"content", "view"})  # embeds and attachments are never touched
+        self.assertEqual(kwargs["content"], "**Latest recap:** Violet · Loss · 29:13")
+        buttons = [(b.label, b.url) for b in kwargs["view"].children]
+        self.assertEqual(buttons, [("The Pitboss", "https://site/"), (LATEST_LABEL, "https://discord.com/channels/1/1/9")])
+
+    async def test_no_header_when_latest_is_first(self):
+        from unittest.mock import AsyncMock
+        from cogs.recaps import update_header
+        thread = MagicMock(id=1)
+        thread.fetch_message = AsyncMock()
+        await update_header(thread, MagicMock(id=1), "x")
+        thread.fetch_message.assert_not_awaited()
+
+    async def test_header_failure_is_swallowed(self):
+        from unittest.mock import AsyncMock
+        from cogs.recaps import update_header
+        thread = MagicMock(id=1)
+        thread.fetch_message = AsyncMock(side_effect=discord.NotFound(MagicMock(status=404), "gone"))
+        await update_header(thread, MagicMock(id=2, jump_url="u"), "x")  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

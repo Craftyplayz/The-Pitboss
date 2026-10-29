@@ -90,6 +90,35 @@ def add_site_links(post, match, account_id, hero_name):
     return post
 
 
+def post_title(post):
+    embeds = post.get("embeds") or [post.get("embed")]
+    return (embeds[0].title if embeds and embeds[0] else None) or "Match"
+
+
+LATEST_LABEL = "Jump to latest recap"
+
+
+def header_view(first, url):
+    """The first message's existing link buttons, plus one jump button to the newest recap (replacing any old one)."""
+    view = discord.ui.View.from_message(first, timeout=None)
+    for item in [i for i in view.children if getattr(i, "label", None) == LATEST_LABEL]:
+        view.remove_item(item)
+    view.add_item(discord.ui.Button(label=LATEST_LABEL, url=url, emoji="⬇️"))
+    return view
+
+
+async def update_header(thread, latest, title):
+    """Point the Recap Thread's first message at the newest recap: forum posts open at the top, not the bottom.
+    Only its text line and buttons change (a white link button, no blue link); its embeds and images stay."""
+    if latest.id == thread.id:  # the newest recap is the first message itself: nothing to jump to
+        return
+    try:
+        first = await thread.fetch_message(thread.id)  # a forum post's first message shares the thread's id
+        await first.edit(content=f"**Latest recap:** {title}", view=header_view(first, latest.jump_url))
+    except discord.HTTPException as e:  # e.g. the first message was deleted
+        print(f"recaps: header update in {thread.id} failed: {e}")
+
+
 class Recaps(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -159,6 +188,7 @@ class Recaps(commands.Cog):
             db.update_link(self.bot.db, member.id, last_match_id=skip_to)
         recap = recap[:RECAPS_PER_RUN]
         thread = await self.usable_thread(forum, link["thread_id"]) if recap else None
+        latest = None  # (message, title) of the newest recap posted this run
         for match in recap:
             # insights compare against earlier Matches only, so backfilled recaps don't see the future
             earlier = [m for m in history if m["match_id"] < match["match_id"]]
@@ -170,12 +200,15 @@ class Recaps(commands.Cog):
             add_site_links(post, match, link["account_id"], hero_names.get(match["hero_id"], "Hero"))
             if thread:
                 await asyncio.sleep(POST_DELAY)
-                await thread.send(**post)
+                latest = await thread.send(**post), post_title(post)
             else:
-                thread = (await forum.create_thread(name=member.display_name, **post)).thread
+                created = await forum.create_thread(name=member.display_name, **post)
+                thread, latest = created.thread, (created.message, post_title(post))
                 db.update_link(self.bot.db, member.id, thread_id=thread.id)
             # saved per post so a crash mid-batch doesn't double-post
             db.update_link(self.bot.db, member.id, last_match_id=match["match_id"])
+        if latest:
+            await update_header(thread, *latest)
 
     async def full_post(self, match, account_id, earlier, assets, member):
         """Send kwargs for the full recap with souls graph, or None if the Match metadata isn't available."""
