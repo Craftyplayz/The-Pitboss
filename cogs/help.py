@@ -49,6 +49,9 @@ PAGES = [
          "Every hero's win rate, pick rate and Matches. Optionally only games at or above a rank."),
         ("/meta hero hero:", "One hero: win rate, best items, best and worst matchups, and best teammates."),
         ("/meta items hero:", "The items with the highest win rate, for everyone or for one hero."),
+        ("/build hero: rank:",
+         "What players buy on a hero in each phase of the match (0–9, 9–20, 20–30 and 30+ minutes), "
+         "with how often each item is bought and its win rate."),
     ]),
     ("Scrims", [
         ("/scrim",

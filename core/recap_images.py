@@ -1,4 +1,4 @@
-"""Match Recap panels rendered with Pillow: souls by source (under the souls graph) and the scoreboard."""
+"""Panels rendered with Pillow: the Match Recap's souls by source and scoreboard, and the /build buy path."""
 import io
 
 from PIL import Image, ImageDraw
@@ -61,6 +61,42 @@ def souls_image(timeline, sources) -> io.BytesIO:
     img.paste(graph, (0, 0))
     img.paste(bars, (0, graph.height + GAP))
     return _png(img)
+
+
+def _fit(d, text, font, width):
+    """text cut with an ellipsis to fit width (Pillow units)."""
+    if d.textlength(text, font=font) <= width:
+        return text
+    while text and d.textlength(text + "…", font=font) > width:
+        text = text[:-1]
+    return text + "…"
+
+
+def buy_path_image(columns, baseline) -> io.BytesIO:
+    """PNG of the /build buy path. columns = [(label, [(name, icon PNG bytes or None, buy share, win share)])]."""
+    row_h, top, icon = 58, 48, 40
+    col_w = W // len(columns)
+    img = _panel(top + row_h * max(len(rows) for _, rows in columns) + 8)
+    d = ImageDraw.Draw(img)
+    font, small = _font(13), _font(12)
+    for c, (label, rows) in enumerate(columns):
+        x = (c * col_w + 16) * S
+        _title(d, x, 18 * S, label.upper(), GOLD)
+        for i, (name, png, buy, win) in enumerate(rows):
+            y = (top + row_h * i) * S
+            d.rounded_rectangle((x, y, x + icon * S, y + icon * S), 6 * S, fill="#2b2d31")
+            if png:
+                try:
+                    pic = Image.open(io.BytesIO(png)).convert("RGBA").resize((icon * S, icon * S), Image.LANCZOS)
+                    img.alpha_composite(pic, (x, y))
+                except OSError:  # not an image: keep the blank tile
+                    pass
+            tx = x + (icon + 8) * S
+            d.text((tx, y + 2 * S), _fit(d, name, font, (col_w - icon - 30) * S), font=font, fill=TEXT)
+            d.text((tx, y + 22 * S), f"{buy:.0%} buy", font=small, fill=MUTED)
+            colour = WIN if win > baseline + 0.01 else LOSS if win < baseline - 0.01 else TEXT
+            d.text((tx + 66 * S, y + 22 * S), f"{win:.1%} win", font=small, fill=colour)
+    return _png(_final(img))
 
 
 def scoreboard_image(teams) -> io.BytesIO:

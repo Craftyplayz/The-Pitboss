@@ -1,5 +1,7 @@
+import asyncio
 import time
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -9,6 +11,8 @@ from cogs._meta_heroes_embed import heroes_embed
 from cogs._meta_items_embed import items_embed
 from core.api import APIError
 from core.graphs import line_graph
+from core.recap_images import buy_path_image
+from core.shared import item_icon
 
 DAYS = 7
 CACHE_SECONDS = 600
@@ -20,8 +24,14 @@ TREND_DAYS = 14
 # A tier's badge is tier*10 + subtier, so min_average_badge = tier*10 + 1.
 TIERS = ["Initiate", "Seeker", "Acolyte", "Sentinel", "Mystic", "Ritualist", "Emissary", "Oracle", "Phantom", "Ascendant", "Eternus"]
 
+# Item flow columns: the API's fixed phases for normal matches.
+PHASES = ["0–9 min", "9–20 min", "20–30 min", "30+ min"]
+PATH_ITEMS = 4
+RANK_CHOICES = [app_commands.Choice(name="All", value=0)] + [app_commands.Choice(name=f"{t}+", value=i + 1) for i, t in enumerate(TIERS)]
+
 # shortcut: unbounded dict, no eviction; fine for a handful of param combos, upgrade if keys multiply.
 _cache = {}
+_icons = {}  # shop image URL -> PNG bytes; bounded by the item count
 
 
 def win_rate(wins, matches):
@@ -104,6 +114,33 @@ def hero_embed(hero, row, stats, items, item_assets, item_emojis, counters, syne
     return embed
 
 
+def buy_path(flow, item_assets, per=PATH_ITEMS):
+    """[(phase label, [(item_id, buy share, win share)])] from /v1/analytics/item-flow-stats, most-bought first."""
+    total = (flow.get("summary") or {}).get("matches") or 0
+    if not total:
+        return []
+    columns = []
+    for c, label in enumerate(PHASES):
+        nodes = [n for n in flow.get("nodes", []) if n["column"] == c and n["item_id"] in item_assets and n["matches"]]
+        nodes.sort(key=lambda n: -n["matches"])
+        columns.append((label, [(n["item_id"], n["matches"] / total, n["wins"] / n["matches"]) for n in nodes[:per]]))
+    return [col for col in columns if col[1]]
+
+
+async def icon_bytes(item):
+    """The item's shop picture as PNG bytes, or None. Cached until restart."""
+    url = item.get("shop_image") or item_icon(item)
+    if url not in _icons:
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s, s.get(url) as resp:
+                resp.raise_for_status()
+                _icons[url] = await resp.read()
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:  # ValueError: empty URL
+            print(f"icon {url!r} failed: {e}")
+            return None
+    return _icons[url]
+
+
 def trend_graph(points):
     """PNG of the daily win rate, y axis in 5-point steps and always showing 50%."""
     lo, hi = min(v for _, v in points), max(v for _, v in points)
@@ -149,7 +186,7 @@ class Meta(commands.Cog):
     @app_commands.describe(sort="What to sort by", rank="Only matches at or above this rank")
     @app_commands.choices(
         sort=[app_commands.Choice(name="Win rate", value="win"), app_commands.Choice(name="Pick rate", value="pick")],
-        rank=[app_commands.Choice(name="All", value=0)] + [app_commands.Choice(name=f"{t}+", value=i + 1) for i, t in enumerate(TIERS)],
+        rank=RANK_CHOICES,
     )
     async def heroes(self, interaction: discord.Interaction, sort: app_commands.Choice[str], rank: app_commands.Choice[int] = None):
         tier = rank.value if rank else 0
@@ -224,6 +261,43 @@ class Meta(commands.Cog):
             return items_embed(rows, item_assets, item_emojis, heroes[hero] if hero else None, DAYS, minimum)
 
         await self.run(interaction, build)
+
+    @app_commands.command(name="build", description="What to buy on a hero in each phase of the match, last 7 days")
+    @app_commands.autocomplete(hero=hero_autocomplete)
+    @app_commands.describe(hero="The hero", rank="Only matches at or above this rank")
+    @app_commands.choices(rank=RANK_CHOICES)
+    async def build(self, interaction: discord.Interaction, hero: int, rank: app_commands.Choice[int] = None):
+        tier = rank.value if rank else 0
+
+        async def make():
+            heroes = await self.bot.api.heroes()
+            if hero not in heroes:
+                return discord.Embed(description="Unknown hero. Pick one from the list.", color=discord.Color.red())
+            flow = await self.fetch("/v1/analytics/item-flow-stats", hero_ids=hero,
+                                    min_average_badge=tier * 10 + 1 if tier else None) or {}
+            item_assets = {i: a for i, a in (await self.bot.api.items()).items() if a.get("type") == "upgrade"}
+            columns = buy_path(flow, item_assets)
+            h = heroes[hero]
+            ui = (h.get("colors") or {}).get("ui")
+            embed = discord.Embed(title=f"{h['name']} · buy path", color=discord.Color.from_rgb(*ui) if ui else discord.Color.blurple())
+            if icon := (h.get("images") or {}).get("icon_image_small"):
+                embed.set_thumbnail(url=icon)
+            if not columns:
+                embed.description = "No matches in this window."
+                return embed
+            summary = flow["summary"]
+            baseline = summary["wins"] / summary["matches"]
+            embed.description = (f"Most-bought items in each phase of the match{f', {rank.name} matches' if tier else ''}. "
+                                 f"Win rate is green above and red below the hero's {baseline:.1%}.")
+            embed.set_footer(text=f"{summary['matches']:,} matches · last {DAYS} days · all players")
+            ids = [i for _, rows in columns for i, _, _ in rows]
+            icons = dict(zip(ids, await asyncio.gather(*(icon_bytes(item_assets[i]) for i in ids))))
+            image = buy_path_image([(label, [(item_assets[i]["name"], icons[i], buy, win) for i, buy, win in rows])
+                                    for label, rows in columns], baseline)
+            embed.set_image(url="attachment://build.png")
+            return embed, discord.File(image, "build.png")
+
+        await self.run(interaction, make)
 
 
 async def setup(bot):

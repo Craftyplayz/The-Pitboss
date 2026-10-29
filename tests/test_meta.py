@@ -1,6 +1,9 @@
 import unittest
 
-from cogs.meta import hero_embed, place, rank_by_wr, trend_points, week_change, win_rate
+from PIL import Image
+
+from cogs.meta import buy_path, hero_embed, place, rank_by_wr, trend_points, week_change, win_rate
+from core.recap_images import buy_path_image
 
 
 class MetaHelpers(unittest.TestCase):
@@ -60,6 +63,33 @@ class HeroEmbed(unittest.TestCase):
     def test_embed_no_row(self):
         e = hero_embed({"id": 5, "name": "X"}, None, [], [], {}, {}, [], [], {}, {}, None)
         self.assertEqual(e.description, "No matches in this window.")
+
+
+class BuyPath(unittest.TestCase):
+    FLOW = {"summary": {"wins": 50, "matches": 100}, "nodes": [
+        {"column": 0, "item_id": 1, "wins": 30, "matches": 60},
+        {"column": 0, "item_id": 2, "wins": 50, "matches": 80},
+        {"column": 0, "item_id": 9, "wins": 99, "matches": 99},  # not an upgrade: left out
+        {"column": 2, "item_id": 3, "wins": 0, "matches": 0},  # no matches: left out, so the column is dropped
+        {"column": 1, "item_id": 3, "wins": 5, "matches": 10},
+    ]}
+    ITEMS = {1: {"name": "A"}, 2: {"name": "B"}, 3: {"name": "Some very long item name indeed"}}
+
+    def test_columns_most_bought_first(self):
+        cols = buy_path(self.FLOW, self.ITEMS)
+        self.assertEqual(cols, [("0–9 min", [(2, 0.8, 0.625), (1, 0.6, 0.5)]), ("9–20 min", [(3, 0.1, 0.5)])])
+        self.assertEqual(len(buy_path(self.FLOW, self.ITEMS, per=1)[0][1]), 1)
+
+    def test_no_matches(self):
+        self.assertEqual(buy_path({}, self.ITEMS), [])
+        self.assertEqual(buy_path({"summary": {"matches": 0}, "nodes": []}, self.ITEMS), [])
+
+    def test_image(self):
+        cols = [(label, [(self.ITEMS[i]["name"], b"not a png" if i == 3 else None, buy, win) for i, buy, win in rows])
+                for label, rows in buy_path(self.FLOW, self.ITEMS)]
+        img = Image.open(buy_path_image(cols, 0.5))
+        self.assertEqual(img.format, "PNG")
+        self.assertEqual(img.width, 800)
 
 
 if __name__ == "__main__":
