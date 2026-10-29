@@ -107,29 +107,45 @@ class Link(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="setup", description="Choose the Recap Thread forum and the scrim log channel.")
+    @app_commands.command(name="setup", description="Choose the bot's channels. Leave all options empty to see the current ones.")
     @app_commands.describe(recap_forum="Forum where Recap Threads are created",
-                           scrim_log="Channel where finished scrims are logged, each with a discussion thread")
+                           scrim_log="Channel where finished scrims are logged, each with a discussion thread",
+                           patch_notes="Channel where new Deadlock patch notes are posted")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.guild_only()
-    async def setup_cmd(self, interaction: discord.Interaction, recap_forum: discord.ForumChannel,
-                        scrim_log: discord.TextChannel):
-        db.set_setting(self.bot.db, "recap_forum_id", recap_forum.id)
-        db.set_setting(self.bot.db, "scrim_log_id", scrim_log.id)
+    async def setup_cmd(self, interaction: discord.Interaction, recap_forum: discord.ForumChannel | None = None,
+                        scrim_log: discord.TextChannel | None = None, patch_notes: discord.TextChannel | None = None):
         await interaction.response.defer(ephemeral=True)
-        perms = recap_forum.permissions_for(interaction.guild.me)
-        msg = f"Recaps will be posted in {recap_forum.mention}."
-        if not (perms.view_channel and perms.create_public_threads and perms.send_messages_in_threads):
-            msg += " Warning: I can't create posts there. Give me View Channel, Create Posts and Send Messages in Posts."
-        msg += f"\nFinished scrims will be logged in {scrim_log.mention}, each with a discussion thread."
-        try:
-            await lock_log_channel(scrim_log, interaction.guild.default_role, interaction.guild.me)
-            msg += " The channel is now read-only except inside the threads."
-        except discord.Forbidden:
-            msg += ("\nI couldn't change its permissions (I need Manage Roles there). To make it read-only by hand, "
-                    "edit the channel's @everyone permissions: Send Messages off, Send Messages in Threads on, "
-                    "Create Public Threads off. Then give me Send Messages and Create Public Threads.")
-        await interaction.followup.send(msg, ephemeral=True)
+        me, lines = interaction.guild.me, []
+        if recap_forum:
+            db.set_setting(self.bot.db, "recap_forum_id", recap_forum.id)
+            perms = recap_forum.permissions_for(me)
+            lines.append(f"Recaps will be posted in {recap_forum.mention}.")
+            if not (perms.view_channel and perms.create_public_threads and perms.send_messages_in_threads):
+                lines[-1] += " Warning: I can't create posts there. Give me View Channel, Create Posts and Send Messages in Posts."
+        if scrim_log:
+            db.set_setting(self.bot.db, "scrim_log_id", scrim_log.id)
+            lines.append(f"Finished scrims will be logged in {scrim_log.mention}, each with a discussion thread.")
+            try:
+                await lock_log_channel(scrim_log, interaction.guild.default_role, me)
+                lines[-1] += " The channel is now read-only except inside the threads."
+            except discord.Forbidden:
+                lines.append("I couldn't change its permissions (I need Manage Roles there). To make it read-only by hand, "
+                             "edit the channel's @everyone permissions: Send Messages off, Send Messages in Threads on, "
+                             "Create Public Threads off. Then give me Send Messages and Create Public Threads.")
+        if patch_notes:
+            db.set_setting(self.bot.db, "patch_notes_id", patch_notes.id)
+            perms = patch_notes.permissions_for(me)
+            lines.append(f"New Deadlock patch notes will be posted in {patch_notes.mention}, starting with the next update.")
+            if not (perms.send_messages and perms.embed_links and perms.create_public_threads):
+                lines[-1] += " Warning: give me Send Messages, Embed Links and Create Public Threads there."
+        if not lines:
+            def current(key):
+                cid = db.get_setting(self.bot.db, key)
+                return f"<#{cid}>" if cid else "not set"
+            lines = ["Current setup:", f"Recap forum: {current('recap_forum_id')}",
+                     f"Scrim log: {current('scrim_log_id')}", f"Patch notes: {current('patch_notes_id')}"]
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     @app_commands.command(name="link", description="Link your Deadlock account to get match recaps.")
     @app_commands.describe(player="Type your Steam name and pick from the list, or give a Steam ID or profile URL")

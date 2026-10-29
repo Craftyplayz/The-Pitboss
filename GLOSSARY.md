@@ -62,3 +62,7 @@ _Avoid_: Custom game, inhouse, private match
 **Recap Thread**:
 The forum post, one per Member, where that Member's Match Recaps are posted. It is created with the first Match Recap and archived when the Link ends.
 _Avoid_: Feed, log
+
+**Patch Notes**:
+Valve's changelog for one Deadlock update, taken from Steam. The bot posts each new one in the patch notes channel picked with /setup; long ones continue in a thread under the post.
+_Avoid_: Changelog, update post
