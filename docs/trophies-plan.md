@@ -1,10 +1,15 @@
 # Trophies plan
 
-Status: plan only, nothing built yet. All numbers are first guesses. Check them against real linked-member data before building (see "Calibration").
+Status: plan only, nothing built yet. Thresholds are based on one real Player, Ravenye (account 54718219). Check them against all Linked Members before building (see "Calibration").
 
 ## How trophies work
 
-- **Career trophies** have 5 tiers: Bronze, Silver, Gold, Platinum, Diamond. Each tier has its own name. The first tiers come within a few matches; the top tier takes roughly 300 to 500+ matches.
+- **Career trophies** have 7 tiers. Each tier has its own name. A tier's threshold is set so an average player reaches it after a set number of matches:
+
+  | Tier | 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
+  |---|---|---|---|---|---|---|---|
+  | Matches to reach | 2–3 | 8–10 | 40–50 | 80–100 | 200–250 | 400–500 | ~1,000 |
+
 - **Single-match trophies** are earned in one match. They're hard but reachable for a normal player.
 - A Player keeps every tier they reach. Only the highest tier of a family shows on the profile.
 - **Rarity** = % of Linked Members who hold that trophy tier. "Rarest" = lowest %.
@@ -18,54 +23,78 @@ Status: plan only, nothing built yet. All numbers are first guesses. Check them 
 
 Metadata stats get added to per-player totals in the database each time a Recap runs.
 
+### Ravenye's per-match averages (the baseline)
+
+| Stat | Average | Source |
+|---|---|---|
+| Kills | 5.1 | 80 matches |
+| Deaths | 5.3 | 80 matches |
+| Assists | 13 | 80 matches |
+| Souls | 36,800 | 80 matches |
+| Match length | 36.6 min | 80 matches |
+| Win rate | 51% | 80 matches |
+| Damage dealt | 26,400 | 12 matches |
+| Damage taken | 29,400 | 12 matches |
+| Healing | 6,650 | 12 matches |
+| Items bought | ~15 total, ~5 per type | 12 matches |
+
+Ravenye buys almost only Spirit items (12.4 Spirit, 2.4 Vitality, 0.3 Weapon per match), so item tiers assume an even ~5 per type.
+
 ## Display
 
 - **`/profile`**: a small "Trophies — 37 / 140" section showing the 3 newest and 3 rarest trophies. An **All trophies** button opens the full list.
-- **`/trophies [member]`**: the full list, grouped by category, with tier, date earned and rarity. Trophies you don't have yet show as locked, with progress (e.g. "Reaper — 1,204 / 1,500 kills").
+- **`/trophies [member]`**: the full list, grouped by category, with tier, date earned and rarity. Trophies you don't have yet show as locked, with progress (e.g. "Reaper — 1,204 / 1,250 kills").
 
 ---
 
 ## Career trophies (count up every match)
 
+Each cell is the tier name, then the threshold.
+
 ### Combat
 
-| Family | Bronze | Silver | Gold | Platinum | Diamond |
-|---|---|---|---|---|---|
-| **Kills** | First Blood — 10 | Headhunter — 100 | Executioner — 500 | Reaper — 1,500 | Death Incarnate — 3,000 |
-| **Deaths** | Respawn — 10 | Frequent Flyer — 100 | Corpse Run — 500 | Revenant — 1,500 | Undying — 3,000 |
-| **Assists** | Wingman — 25 | Support Act — 250 | Playmaker — 1,000 | Puppetmaster — 2,500 | The Enabler — 5,000 |
-| **Damage dealt** \* | Scrapper — 100k | Bruiser — 1M | Wrecking Ball — 5M | Demolisher — 10M | Annihilator — 15M |
-| **Damage taken** \* | Punching Bag — 100k | Tough Skin — 1M | Iron Wall — 5M | Juggernaut — 10M | Unbreakable — 15M |
-| **Healing** \* | Band-Aid — 20k | Medic — 200k | Field Surgeon — 750k | Lifeline — 1.5M | Miracle Worker — 2.5M |
+| Family | 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
+|---|---|---|---|---|---|---|---|
+| **Kills** | First Blood — 15 | Headhunter — 50 | Slayer — 250 | Executioner — 500 | Reaper — 1,250 | Death Incarnate — 2,500 | Extinction Event — 5,000 |
+| **Deaths** | Respawn — 15 | Frequent Flyer — 50 | Corpse Run — 250 | Graveyard Regular — 500 | Revenant — 1,250 | Undying — 2,500 | Eternal Return — 5,000 |
+| **Assists** | Wingman — 30 | Support Act — 125 | Team Player — 600 | Playmaker — 1,250 | Puppetmaster — 3,000 | The Enabler — 6,000 | The Architect — 12,500 |
+| **Damage dealt** \* | Scrapper — 75k | Bruiser — 250k | Heavy Hitter — 1.25M | Wrecking Ball — 2.5M | Demolisher — 6M | Annihilator — 12.5M | Cataclysm — 25M |
+| **Damage taken** \* | Punching Bag — 75k | Tough Skin — 275k | Thick Hide — 1.25M | Iron Wall — 2.75M | Juggernaut — 7M | Unbreakable — 12.5M | Immovable Object — 30M |
+| **Healing** \* | Band-Aid — 20k | Medic — 60k | Field Surgeon — 300k | Lifeline — 600k | Miracle Worker — 1.5M | Saint — 3M | Fountain of Life — 6.5M |
 
-\* since Link only. Estimated per-match averages: about 6 kills, 6 deaths, 10 assists, 30k damage dealt and taken, 5k healing.
+\* since Link only.
 
 ### Economy
 
-| Family | Bronze | Silver | Gold | Platinum | Diamond |
-|---|---|---|---|---|---|
-| **Souls earned** | Pocket Change — 200k | Soul Collector — 2M | Soul Hoarder — 10M | Soul Baron — 20M | Soul Tycoon — 30M |
+| Family | 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
+|---|---|---|---|---|---|---|---|
+| **Souls earned** | Pocket Change — 100k | Soul Collector — 350k | Soul Hoarder — 1.75M | Soul Baron — 3.5M | Soul Tycoon — 9M | Soul Mogul — 17.5M | Soul Emperor — 35M |
 
 ### Results
 
+| Family | 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
+|---|---|---|---|---|---|---|---|
+| **Matches played** | Rookie — 3 | Regular — 10 | Veteran — 50 | Lifer — 100 | Die-Hard — 250 | Institution — 500 | The Pitboss — 1,000 |
+| **Time played** | Warm-Up — 1.5h | Dedicated — 5h | Grinder — 25h | Committed — 50h | No-Lifer — 150h | Living in the Pit — 300h | One with the Pit — 600h |
+| **Total wins** | First Win — 1 | Contender — 5 | Victor — 25 | Champion — 50 | Conqueror — 125 | Warlord — 250 | Legend — 500 |
+| **Total losses** | Learning Experience — 1 | Hard Knocks — 5 | Glutton for Punishment — 25 | Still Here — 50 | Iron Will — 125 | Never Gives Up — 250 | Eternal Optimist — 500 |
+
+Streaks aren't totals, so they keep their own 5 tiers:
+
 | Family | Bronze | Silver | Gold | Platinum | Diamond |
 |---|---|---|---|---|---|
-| **Matches played** | Rookie — 10 | Regular — 50 | Veteran — 150 | Lifer — 300 | The Pitboss — 500 |
-| **Time played** | Warm-Up — 5h | Dedicated — 25h | Grinder — 75h | No-Lifer — 150h | Living in the Pit — 250h |
-| **Total wins** | Contender — 5 | Victor — 25 | Champion — 75 | Conqueror — 150 | Legend — 300 |
-| **Total losses** | Learning Experience — 5 | Hard Knocks — 25 | Glutton for Punishment — 75 | Still Here — 150 | Unbreakable Spirit — 300 |
 | **Win streak** (best ever) | On a Roll — 3 | Hot Streak — 5 | Unstoppable — 7 | Dominating — 10 | Godlike — 12 |
 | **Lose streak** (worst ever) | Rough Patch — 3 | Tilted — 5 | Cursed — 7 | Rock Bottom — 10 | Uninstall? — 12 |
 
 ### Items (since Link only)
 
-The shop has 3 item types: **Weapon**, **Vitality** and **Spirit**. Melee items are part of Weapon. Counts are purchases of that type. Estimate: about 4 per type per match.
+The shop has 3 item types: **Weapon**, **Vitality** and **Spirit**. Melee items are part of Weapon. Counts are purchases of that type, including items later sold.
 
-| Family | Bronze — 25 | Silver — 100 | Gold — 400 | Platinum — 1,000 | Diamond — 2,000 |
-|---|---|---|---|---|---|
-| **Weapon** | Armed | Gunslinger | Arms Dealer | Arsenal | Walking Armory |
-| **Vitality** | Healthy | Hardy | Fortified | Bulwark | Immortal |
-| **Spirit** | Spark | Mystic | Arcanist | Archmage | Spirit Lord |
+| Family | 1 Bronze — 15 | 2 Silver — 50 | 3 Gold — 250 | 4 Platinum — 500 | 5 Diamond — 1,250 | 6 Master — 2,500 | 7 Eternal — 5,000 |
+|---|---|---|---|---|---|---|---|
+| **Weapon** | Armed | Gunslinger | Sharpshooter | Arms Dealer | Arsenal | Walking Armory | God of War |
+| **Vitality** | Healthy | Hardy | Sturdy | Fortified | Bulwark | Immortal | Living Fortress |
+| **Spirit** | Spark | Mystic | Sorcerer | Arcanist | Archmage | Spirit Lord | Ascended |
 
 Extra (optional): **Collector**, for the number of *different* items ever bought: 10 Window Shopper, 30 Bargain Hunter, 60 Collector, 90 Hoarder, every item The Whole Shop.
 
@@ -73,9 +102,9 @@ Extra (optional): **Collector**, for the number of *different* items ever bought
 
 **Hero mastery**: one family per hero, counting matches on that hero. It shows as "Haze Expert".
 
-| Bronze | Silver | Gold | Platinum | Diamond |
-|---|---|---|---|---|
-| Tryout — 5 | Regular — 25 | Specialist — 75 | Expert — 150 | Master — 300 |
+| 1 Bronze | 2 Silver | 3 Gold | 4 Platinum | 5 Diamond | 6 Master | 7 Eternal |
+|---|---|---|---|---|---|---|
+| Tryout — 3 | Regular — 10 | Specialist — 50 | Expert — 100 | Master — 250 | Grandmaster — 500 | Legend — 1,000 |
 
 **Jack of All Trades**: number of different heroes won with.
 
@@ -110,8 +139,8 @@ When a new hero comes out, Diamond needs it too. Players who already have Diamon
 ## Build notes (for later)
 
 - **Storage**: `player_totals(account_id, stat, value)` for since-Link sums. `trophies(account_id, trophy, tier, earned_at, match_id)` for earned trophies, so "newest" and rarity are one query each.
-- **Check when building**: does match metadata have damage taken, and kill times (for multi-kills)? If either is missing, drop that family.
-- **Calibration**: before building, compute the median per match for each stat across Linked Members. Then scale the thresholds so Diamond takes about 400 matches.
+- **Metadata fields (checked)**: final `stats[-1]` has `player_damage`, `player_damage_taken` and `player_healing`. `items[]` lists every purchase with `item_id` and `sold_time_s`; keep only assets with `type == "upgrade"` and group by `item_slot_type`. Kill times for multi-kills come from each enemy's `death_details[]` (`game_time_s`, `killer_player_slot`).
+- **Calibration**: before building, compute the median per match for each stat across all Linked Members, not just Ravenye, and re-check the tier table above.
 
 ## Open questions
 
