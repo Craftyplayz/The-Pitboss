@@ -39,8 +39,8 @@ class Profile(unittest.TestCase):
 
     def test_hero_table_sorted_by_matches(self):
         rows = hero_table(HS, {1: "Drifter", 2: "Wraith"}).splitlines()
-        self.assertTrue(rows[2].startswith("Drifter"))
-        self.assertTrue(rows[3].startswith("Wraith"))
+        self.assertEqual(rows[0], "**Drifter** · 3 Matches · 67% · 4.00 KDA · 1,000 souls/min · 50% acc")
+        self.assertTrue(rows[1].startswith("**Wraith**"))
 
     def test_mates_mention_linked(self):
         mates = [{"mate_id": 7, "matches_played": 5, "wins": 3}, {"mate_id": 8, "matches_played": 9, "wins": 3}]

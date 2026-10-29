@@ -66,14 +66,14 @@ def weighted(hero_stats, key):
 
 def hero_table(hero_stats, hero_names):
     rows = sorted(hero_stats, key=lambda h: -h["matches_played"])[:TOP_HEROES]
-    lines = [f"{'Hero':<12}{'M':>3}{'WR':>5}{'KDA':>6}{'SPM':>6}{'Acc':>5}"]
+    lines = []
     for h in rows:
         m = h["matches_played"]
-        name = hero_names.get(h["hero_id"], f"Hero {h['hero_id']}")[:12]
-        acc = f"{h['accuracy']:.0%}" if h.get("accuracy") is not None else "-"
-        lines.append(f"{name:<12}{m:>3}{h['wins'] / m:>5.0%}{(h['kills'] + h['assists']) / max(h['deaths'], 1):>6.2f}"
-                     f"{h['networth_per_min']:>6,.0f}{acc:>5}")
-    return "```\n" + "\n".join(lines) + "\n```"
+        name = hero_names.get(h["hero_id"], f"Hero {h['hero_id']}")
+        acc = f" · {h['accuracy']:.0%} acc" if h.get("accuracy") is not None else ""
+        lines.append(f"**{name}** · {m} Matches · {h['wins'] / m:.0%} · {(h['kills'] + h['assists']) / max(h['deaths'], 1):.2f} KDA"
+                     f" · {h['networth_per_min']:,.0f} souls/min{acc}")
+    return "\n".join(lines)
 
 
 def mates_text(mates, names, linked):
