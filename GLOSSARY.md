@@ -55,6 +55,10 @@ _Avoid_: Analysis, tip
 A message the bot posts on its own after a Linked Member finishes a Match. On linking, every Match from the 30 days before the Link gets one (the Backfill). After that, a Match missed for more than 24 hours gets none.
 _Avoid_: Notification, alert, match post
 
+**Scrim**:
+A custom Match between Members, set up with /scrim: Members sign up in its own channel, get split into two teams and play in a custom lobby the bot makes. Its scoreboard is saved once the Match is over.
+_Avoid_: Custom game, inhouse, private match
+
 **Recap Thread**:
 The forum post, one per Member, where that Member's Match Recaps are posted. It is created with the first Match Recap and archived when the Link ends.
 _Avoid_: Feed, log

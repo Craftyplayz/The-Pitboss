@@ -43,10 +43,17 @@ class DeadlockAPI:
 
     async def get(self, path, **params):
         """GET a path like "/v1/players/123/rank" and return parsed JSON. Returns None on 404."""
+        return await self.request("GET", path, params)
+
+    async def post(self, path, payload=None):
+        """POST a JSON body and return parsed JSON. Returns None on 404 or an empty reply."""
+        return await self.request("POST", path, {}, payload)
+
+    async def request(self, method, path, params, payload=None):
         params = {k: str(v).lower() if isinstance(v, bool) else v for k, v in params.items() if v is not None}
         started, status, size = time.monotonic(), "error", 0
         try:
-            async with self.session.get(path, params=params) as resp:
+            async with self.session.request(method, path, params=params, json=payload) as resp:
                 status = resp.status
                 body = await resp.read()
                 size = len(body)
@@ -56,7 +63,7 @@ class DeadlockAPI:
                     raise APIError("The Deadlock stats API is busy. Try again in a minute.")
                 if resp.status >= 400:
                     raise APIError(f"The Deadlock stats API returned an error ({resp.status}).")
-                return json.loads(body)
+                return json.loads(body) if body else None
         except (aiohttp.ClientError, TimeoutError) as e:
             raise APIError("Couldn't reach the Deadlock stats API.") from e
         finally:

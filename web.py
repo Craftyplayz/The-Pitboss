@@ -99,6 +99,9 @@ async def index(request):
     data = await dashboard_data(request.app)
     if not data or not data["P"]:
         return web.Response(text=empty_page("No Linked Players have played in the last 30 days."), content_type="text/html")
+    # scrims come from the bot's database, not the API, so they are read fresh on every load
+    scrims = [{**json.loads(r["detail"]), "sid": r["id"]} for r in db.scrims_in(request.app["db"], "done")]
+    data = {**data, "SC": sorted(scrims, key=lambda s: -s["sid"])}
     return web.Response(text=render_page(request.app["template"], data), content_type="text/html")
 
 

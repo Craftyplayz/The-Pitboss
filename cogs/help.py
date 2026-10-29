@@ -50,6 +50,17 @@ PAGES = [
         ("/meta hero hero:", "One hero: win rate, best items, best and worst matchups, and best teammates."),
         ("/meta items hero:", "The items with the highest win rate, for everyone or for one hero."),
     ]),
+    ("Scrims", [
+        ("/scrim",
+         "Opens a scrim-<number> channel with a Join button. Everyone who wants to play presses Join, "
+         "then the creator presses Start scrim and picks random teams or lets players pick their own."),
+        ("The lobby",
+         "The bot makes a Deadlock custom lobby and posts its code. Join it in game and take your team's side "
+         "within 15 minutes; the creator can press New code if it runs out."),
+        ("Results",
+         "Once the Match is over, every player's stats are saved, posted to the scrim log channel and "
+         "listed in the Scrims section of the website."),
+    ]),
 ]
 
 
