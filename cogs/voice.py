@@ -51,7 +51,8 @@ class Voice(commands.Cog):
         higher = [made[k] for k in sorted(made) if k > n]
         channel = None
         try:
-            channel = await hub.guild.create_voice_channel(f"Deadlock {n}", category=hub.category, reason="Voice hub")
+            channel = await hub.guild.create_voice_channel(f"Deadlock {n}", category=hub.category,
+                                                             rtc_region="sydney", reason="Voice hub")
             # keep them in number order: right above the next one up, else right below the previous one (or the hub)
             if higher:
                 await channel.move(before=higher[0])
