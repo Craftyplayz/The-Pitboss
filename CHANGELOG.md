@@ -2,6 +2,10 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+## 1.6.0
+
+- New **voice hub**: join it and the bot makes a Deadlock 1, 2, 3... voice channel for you and moves you in. Empty ones are deleted. Admins pick the hub with the new **voice_hub** option in /setup.
+
 ## 1.5.1
 
 - Fixed the website showing an error page instead of the dashboard.

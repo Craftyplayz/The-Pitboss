@@ -70,3 +70,7 @@ _Avoid_: Changelog, update post
 **Bot Update**:
 A new version of The Pitboss itself, listed in CHANGELOG.md. After a restart onto a new version the bot posts the old and new version and what changed in the bot updates channel picked with /setup. Not to be confused with Patch Notes, which are Deadlock's.
 _Avoid_: Release, patch
+
+**Voice Hub**:
+The voice channel picked with /setup. Joining it makes a new voice channel in the same category, named Deadlock 1, 2, 3 and so on, and moves you in. New channels take the lowest free number and sit in number order. A Deadlock channel is deleted as soon as it's empty.
+_Avoid_: Join to create, lobby

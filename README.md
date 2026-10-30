@@ -77,7 +77,7 @@ A dashboard at [deadlock.craftyplayz.com](https://deadlock.craftyplayz.com) with
 
 | Command | What it does |
 |---|---|
-| `/setup` | Pick the recap forum, scrim log, patch notes and bot updates channels. Leave all options empty to see the current setup |
+| `/setup` | Pick the recap forum, scrim log, patch notes and bot updates channels, and the voice hub. Leave all options empty to see the current setup |
 | `/rebuild-recaps` | Delete every Recap Thread and post all recaps again |
 
 ## Self-hosting
@@ -114,7 +114,7 @@ python web.py
 The database is stored at `data/pitboss.db` (change it with `DB_PATH`).
 
 ### 3. Set up the channels
-In Discord, run `/setup` and pick the recap forum, scrim log, patch notes and bot updates channels.
+In Discord, run `/setup` and pick the recap forum, scrim log, patch notes and bot updates channels, and the voice hub.
 
 ## Running the tests
 ```sh
