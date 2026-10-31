@@ -101,7 +101,7 @@ Copy `.env.example` to `.env` and fill it in:
 | `ADMIN_PASSWORD` | No | Password for `/admin`, the API call log viewer. Leave empty to turn it off |
 | `DISCORD_CLIENT_ID` | For the control panel | Developer Portal > your app > OAuth2 > Client ID |
 | `DISCORD_CLIENT_SECRET` | For the control panel | Developer Portal > your app > OAuth2 > Client Secret |
-| `DASH_URL` | No | The control panel's public address (default `https://dash.pitboss.craftyplayz.com`). Add `<DASH_URL>/callback` as a redirect in Developer Portal > OAuth2 |
+| `DASH_URL` | No | The control panel's public address (default `https://pitstop.craftyplayz.com`). Add `<DASH_URL>/callback` as a redirect in Developer Portal > OAuth2 |
 
 ### 2. Run with Docker (recommended)
 ```sh

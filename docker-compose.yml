@@ -36,7 +36,7 @@ services:
       # Developer Portal > your app > OAuth2; add <DASH_URL>/callback as a redirect there
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
-      DASH_URL: ${DASH_URL:-https://dash.pitboss.craftyplayz.com}
+      DASH_URL: ${DASH_URL:-https://pitstop.craftyplayz.com}
       DASH_PORT: 8643
     # put a reverse proxy (with HTTPS) for the DASH_URL host in front of this port
     ports:

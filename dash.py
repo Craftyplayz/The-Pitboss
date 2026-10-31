@@ -171,7 +171,7 @@ def make_app():
     app["token"], app["guild_id"] = os.environ["DISCORD_TOKEN"], int(os.environ["GUILD_ID"])
     app["client_id"] = os.environ["DISCORD_CLIENT_ID"]
     app["secret"] = os.environ["DISCORD_CLIENT_SECRET"]  # also signs the session cookie
-    app["url"] = os.environ.get("DASH_URL", "https://dash.pitboss.craftyplayz.com").rstrip("/")
+    app["url"] = os.environ.get("DASH_URL", "https://pitstop.craftyplayz.com").rstrip("/")
     app["secure"] = app["url"].startswith("https://")
 
     async def start(app):

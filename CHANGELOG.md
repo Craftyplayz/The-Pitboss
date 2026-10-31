@@ -2,9 +2,13 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+## 1.7.0.1
+
+- The control panel is at pitstop.craftyplayz.com.
+
 ## 1.7.0
 
-- New control panel at dash.pitboss.craftyplayz.com: admins log in with Discord and change the bot's channels and welcome message from the browser.
+- New control panel at pitstop.craftyplayz.com: admins log in with Discord and change the bot's channels and welcome message from the browser.
 
 ## 1.6.5
 
