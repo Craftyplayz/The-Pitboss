@@ -311,7 +311,12 @@ ICONS = {
     "translate": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z"/>',
     "setup": '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
     "logs": '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/>',
+    "admin": '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
 }
+
+
+async def admin_tab(request):
+    raise web.HTTPFound("https://www.youtube.com/watch?v=dQw4w9WgXcQ")  # easter egg: told you not to touch
 # Sidebar order, top to bottom: move a line to move its tab. (url slug, label, subtitle, page)
 TABS = [
     ("welcome", "Welcome & Roles", "What new members see, and the roles they can pick", welcome_tab),
@@ -320,6 +325,7 @@ TABS = [
     ("games", "Games", "Fun stuff to play in the server", games_tab),
     ("voice", "Voice", "Transcripts and recordings of voice calls", voice_tab),
     ("translate", "Translate", "Automatic translation between languages", translate_tab),
+    ("admin", "Admin (do not touch)", "", admin_tab),
 ]
 # Always at the bottom of the sidebar, in this order.
 PINNED = [
