@@ -36,7 +36,10 @@ class Pitboss(commands.Bot):
             print(f"Couldn't set the About Me: {e}")
         for path in sorted(Path(__file__).parent.joinpath("cogs").glob("*.py")):
             if not path.name.startswith("_"):
-                await self.load_extension(f"cogs.{path.stem}")
+                try:
+                    await self.load_extension(f"cogs.{path.stem}")
+                except commands.ExtensionError as e:  # one broken cog shouldn't take the rest of the bot down
+                    print(f"Couldn't load cogs.{path.stem}: {e!r}")
         # one server: register commands to it so they appear instantly
         self.tree.copy_global_to(guild=GUILD)
         await self.tree.sync(guild=GUILD)
