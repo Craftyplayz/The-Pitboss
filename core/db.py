@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS scrim_players (
     joined_at INTEGER NOT NULL,
     PRIMARY KEY (scrim_id, member_id)
 );
+CREATE TABLE IF NOT EXISTS dash_log (
+    at      INTEGER NOT NULL,  -- unix seconds
+    user    TEXT NOT NULL,     -- Discord name of whoever used the control panel
+    action  TEXT NOT NULL
+);
 """
 
 
@@ -161,3 +166,13 @@ def set_scrim_teams(conn, scrim_id, teams):
     with conn:
         conn.executemany("UPDATE scrim_players SET team = ? WHERE scrim_id = ? AND member_id = ?",
                          [(t, scrim_id, m) for m, t in teams.items()])
+
+
+def log_dash(conn, at, user, action):
+    with conn:
+        conn.execute("INSERT INTO dash_log (at, user, action) VALUES (?, ?, ?)", (at, user, action))
+
+
+def dash_log(conn, limit=200):
+    """Newest control panel actions first."""
+    return conn.execute("SELECT * FROM dash_log ORDER BY at DESC, rowid DESC LIMIT ?", (limit,)).fetchall()

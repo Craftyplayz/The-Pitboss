@@ -83,7 +83,7 @@ A dashboard at [pitboss.craftyplayz.com](https://pitboss.craftyplayz.com) with O
 
 ## Self-hosting
 
-The Pitboss is built for one Discord server. It runs as three services that share one SQLite database: the **bot** (`bot.py`), the **website** (`web.py`) and the **control panel** (`dash.py`), where admins log in with Discord and change the bot's settings.
+The Pitboss is built for one Discord server. It runs as three services that share one SQLite database: the **bot** (`bot.py`), the **website** (`web.py`) and the **control panel**, The Pitstop (`dash.py`), where admins log in with Discord and change the bot's settings.
 
 ### Requirements
 - Docker and Docker Compose, **or** Python 3.12
@@ -102,6 +102,7 @@ Copy `.env.example` to `.env` and fill it in:
 | `DISCORD_CLIENT_ID` | For the control panel | Developer Portal > your app > OAuth2 > Client ID |
 | `DISCORD_CLIENT_SECRET` | For the control panel | Developer Portal > your app > OAuth2 > Client Secret |
 | `DASH_URL` | No | The control panel's public address (default `https://pitstop.craftyplayz.com`). Add `<DASH_URL>/callback` as a redirect in Developer Portal > OAuth2 |
+| `VOICE_PASSWORD` | No | Second password for the control panel's Voice tab (transcripts and recordings). Leave empty to keep it locked |
 
 ### 2. Run with Docker (recommended)
 ```sh

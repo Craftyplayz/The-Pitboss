@@ -36,7 +36,8 @@ class Changes(unittest.TestCase):
         new = changes({"recap_forum_id": "3", "voice_hub_id": "2", "welcome_channel_id": "4",
                        "welcome_message": "  hi {user}  "}, CHANNELS)
         self.assertEqual(new["recap_forum_id"], "3")
-        self.assertEqual(new["patch_notes_id"], "")  # not sent: unset
+        self.assertNotIn("patch_notes_id", new)  # not on this tab's form: left alone
+        self.assertEqual(changes({"patch_notes_id": ""}, CHANNELS)["patch_notes_id"], "")  # "Not set" clears it
         self.assertEqual(new["welcome_channel_id"], "4")  # announcement channels count as text
         self.assertEqual(new["welcome_message"], "hi {user}")
 
