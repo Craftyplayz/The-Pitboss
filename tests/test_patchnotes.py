@@ -15,7 +15,8 @@ BIG = ('[p][b][u]\\[ General ][/u][/b][/p][p][/p][p]- Can now jump during slide[
 
 
 def item(title, date, contents=MINOR, gid="1"):
-    return {"title": title, "date": date, "contents": contents, "gid": gid}
+    return {"title": title, "date": date, "contents": contents, "gid": gid,
+            "url": f"https://steamstore-a.akamaihd.net/news/externalpost/steam_community_announcements/{gid}"}
 
 
 class Markdown(unittest.TestCase):
@@ -44,7 +45,7 @@ class Splitting(unittest.TestCase):
         embeds = patch_embeds(item("Gameplay Update", 100, "[p]- line[/p]" * 20000))
         self.assertTrue(all(len(e) <= 6000 for e in embeds))
         self.assertEqual(embeds[0].title, "Gameplay Update")
-        self.assertIn("store.steampowered.com/news/app/1422450/view/1", embeds[0].url)
+        self.assertIn("steam_community_announcements/1", embeds[0].url)
         self.assertEqual(embeds[-1].footer.text, f"Part {len(embeds)} of {len(embeds)}")
 
 

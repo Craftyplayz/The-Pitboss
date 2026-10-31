@@ -35,7 +35,8 @@ def is_patch(item):
 
 
 def news_page(item):
-    return f"https://store.steampowered.com/news/app/{APP_ID}/view/{item['gid']}"
+    # the news API's gid isn't the announcement id store links need; its own url redirects to the announcement
+    return item["url"]
 
 
 def to_markdown(bbcode):
