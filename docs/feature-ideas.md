@@ -15,12 +15,17 @@ Ideas for new bot features, easiest first. Tick one off when it ships.
 | [ ] | Timezone tool | ~1–2 hrs | `/timezone set`, then `/time @user` shows their local time. Handy for planning games. |
 | [ ] | Sticky message | ~1 hr | Keeps one message at the bottom of a busy channel by re-posting it after new messages. |
 | [ ] | Leveling | ~3–4 hrs | XP for chatting (with a cooldown so spam doesn't count), `/rank` card, leaderboard, role rewards at set levels. |
+| [ ] | Level-up cards | ~2 hrs | Image card with the member's avatar and new level when they level up. Needs leveling. |
+| [ ] | Voice XP | ~1 hr | Time in voice earns XP, but not when alone or muted. Needs leveling. |
+| [ ] | Event signups | ~2–3 hrs | `/event` posts an event with Going / Maybe buttons and pings everyone who signed up before it starts. |
+| [ ] | Activity heatmap | ~3 hrs | Website page showing which hours and days the server is most active. Fits the existing dashboard. |
 | [ ] | Auto-translation | ~3–4 hrs | Full plan below. |
 | [ ] | Birthday roles | ~1–2 hrs | `/birthday set`. On the day: a special role for 24 hours and a shoutout. |
 | [ ] | Marriage / friends | ~2 hrs | `/marry @user` (they accept with a button), `/divorce`, partner shown on a profile card. |
 | [ ] | Wordle clone | ~3 hrs | One daily word for the whole server, guesses with coloured squares, results shared without spoilers. |
 | [ ] | Music player | ~1 day + regular fixes | Needs ffmpeg and yt-dlp in Docker. YouTube breaks yt-dlp often and bans bot playback in its rules. |
 | [ ] | Voice transcription | 2–3 days | Hardest. discord.py can't receive voice without an extra library (discord-ext-voice-recv), Whisper is heavy on CPU, and everyone recorded must consent (announce it when recording starts). |
+| [ ] | Voice summaries | ~2 hrs | After a call, post a short AI summary of the transcript. Needs voice transcription. |
 
 ## Moderation system
 
