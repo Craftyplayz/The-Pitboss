@@ -19,7 +19,8 @@ from urllib.parse import urlencode
 import aiohttp
 from aiohttp import web
 
-from cogs.welcome import DEFAULT as WELCOME_DEFAULT, PLACEHOLDERS
+from cogs.welcome import load as load_welcome
+from core.embeds import LIMITS, clean as clean_embed
 from core import db
 from core.events import CATEGORIES, default_categories
 
@@ -33,7 +34,9 @@ TEXT, VOICE, FORUM = (0, 5), (2,), (15,)  # Discord channel types; 5 is an annou
 CHANNELS = [("recap_forum_id", "Recap forum", FORUM), ("patch_notes_id", "Patch notes", TEXT),
             ("bot_updates_id", "Bot updates", TEXT), ("voice_hub_id", "Voice hub", VOICE),
             ("welcome_channel_id", "Welcome channel", TEXT)]
-LABELS = {key: label for key, label, _ in CHANNELS} | {"welcome_message": "Welcome message"}
+LABELS = {key: label for key, label, _ in CHANNELS} | {"welcome_embed": "Welcome message"}
+BOT_AVATAR = "https://pitboss.craftyplayz.com/static/pitboss-512.png"
+DEFAULT_AVATAR = "https://cdn.discordapp.com/embed/avatars/0.png"
 LOG_PAGE = 100  # events per page in the Logs tab
 EXPORT_MAX = 50000  # rows in one CSV download
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
@@ -72,8 +75,8 @@ def changes(form, channels):
         if value and not any(c["id"] == value and c["type"] in types for c in channels):
             raise web.HTTPBadRequest(text=f"Unknown channel for {key}")
         out[key] = value
-    if "welcome_message" in form:
-        out["welcome_message"] = form["welcome_message"].strip()[:2000]  # Discord's message limit
+    if form.get("embed") == "welcome":
+        out["welcome_embed"] = json.dumps(clean_embed(form), ensure_ascii=False)
     return out
 
 
@@ -122,13 +125,49 @@ def form(tab, body):
 
 # ---- tabs ----
 
+def embed_editor(name, cfg, sample, prefix="embed_"):
+    """Form fields for an embed (core.embeds), next to a live preview of how Discord will show it.
+    sample fills the placeholders in the preview: name, server, count and avatar."""
+    e = html.escape
+
+    def text(key, label, rows=0, hint=""):
+        attrs = f'id="{prefix}{key}" name="{prefix}{key}" maxlength="{LIMITS[key]}" placeholder="{e(hint)}"'
+        field = f'<textarea {attrs} rows="{rows}">{e(cfg.get(key, ""))}</textarea>' if rows else f'<input {attrs} value="{e(cfg.get(key, ""))}">'
+        return f'<label for="{prefix}{key}">{label}</label>{field}'
+
+    def check(key, label):
+        return f'<label class="check"><input type="checkbox" name="{prefix}{key}" value="1"{" checked" if cfg.get(key) else ""}>{label}</label>'
+
+    inserts = "".join(f'<button type="button" class="ins" data-ins="{{{p}}}">{{{p}}}</button>' for p in ("user", "name", "server", "count"))
+    controls = (f'<input type="hidden" name="embed" value="{name}">'
+                + text("content", "Message text (above the embed; put {user} here to ping them)")
+                + check("show_author", "Show their name and picture at the top") + text("author", "Author line", hint="{name}")
+                + text("title", "Title") + text("description", "Description", rows=6)
+                + f'<label for="{prefix}color">Colour</label><input type="color" id="{prefix}color" name="{prefix}color" value="{e(cfg.get("color", "#F0C35A"))}">'
+                + check("thumbnail", "Show their profile picture on the right")
+                + f'<label for="{prefix}image">Big image (https link)</label><input id="{prefix}image" name="{prefix}image" type="url" maxlength="2000" value="{e(cfg.get("image", ""))}" placeholder="https://...">'
+                + text("footer", "Footer") + check("timestamp", "Show the time in the footer")
+                + f'<p class="phs">Insert where you typed: {inserts}</p>'
+                + "<p><small>{user} pings them in the message text (inside the embed it shows but doesn't ping). "
+                  "Formatting works like Discord: **bold**, *italic*, __underline__, ~~strike~~, `code`, # Heading, &gt; quote, [link](https://...).</small></p>")
+    preview = f"""<div class="dc"><div class="dc-msg"><img class="dc-av" src="{BOT_AVATAR}" alt="">
+<div class="dc-body"><div><span class="dc-name">The Pitboss</span><span class="dc-bot">APP</span><span class="dc-time">Today at <span class="pv-now"></span></span></div>
+<div class="dc-content pv-content"></div><div class="dc-embed pv-embed"><div class="dc-emain">
+<div class="dc-author pv-author"><img src="{e(sample["avatar"])}" alt=""><span class="pv-author-name"></span></div>
+<div class="dc-title pv-title"></div><div class="dc-desc pv-desc"></div><img class="dc-image pv-image" alt=""><div class="dc-footer pv-footer"></div></div>
+<img class="dc-thumb pv-thumb" src="{e(sample["avatar"])}" alt=""></div></div></div></div>"""
+    return (f'<div class="ed embed-editor" data-p="{prefix}" data-sample="{e(json.dumps(sample))}"><div>{controls}</div>'
+            f'<div class="pv"><label>Preview (how it looks in Discord)</label>{preview}</div></div>')
+
+
 async def welcome_tab(request):
-    app = request.app
-    message = html.escape(db.get_setting(app["db"], "welcome_message") or "")
-    return form("welcome", card("Welcome message", channel_select(app, await guild_channels(app), "welcome_channel_id") +
-        f'<label for="welcome_message">Message (empty uses the default)</label>'
-        f'<textarea id="welcome_message" name="welcome_message" maxlength="2000" placeholder="{html.escape(WELCOME_DEFAULT)}">{message}</textarea>'
-        f'<p><small>{html.escape(PLACEHOLDERS).replace("`", "")}</small></p>')) + soon("Role menus: members pick roles with buttons", "Rank roles from linked Deadlock accounts")
+    app, user = request.app, session(request)
+    guild = await discord_get(app, f"/guilds/{app['guild_id']}?with_counts=true", f"Bot {app['token']}")
+    sample = {"name": user["name"], "server": guild["name"], "count": guild.get("approximate_member_count", 0),
+              "avatar": user.get("avatar") or DEFAULT_AVATAR}
+    return form("welcome", card("Welcome channel", channel_select(app, await guild_channels(app), "welcome_channel_id"))
+                + card("Welcome message", embed_editor("welcome", load_welcome(app["db"]), sample))) \
+        + soon("Role menus: members pick roles with buttons", "Rank roles from linked Deadlock accounts") + EDITOR_JS
 
 
 async def utility_tab(request):
@@ -334,6 +373,36 @@ PINNED = [
 ]
 BY_SLUG = {t[0]: t for t in TABS + PINNED}
 
+EDITOR_JS = r"""<script>
+document.querySelectorAll('.embed-editor').forEach(ed=>{
+const P=ed.dataset.p,S=JSON.parse(ed.dataset.sample),f=ed.closest('form'),$=c=>ed.querySelector('.pv-'+c);
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const MENTION='<span class="mention">@'+esc(S.name)+'</span>';
+// placeholders first (the user mention as a marker), then escape, then Discord's markdown
+const fill=s=>esc(s.replace(/\{user\}/g,'\u0001').replace(/\{name\}/g,S.name).replace(/\{server\}/g,S.server).replace(/\{count\}/g,S.count));
+const md=s=>fill(s).replace(/```(?:\w*\n)?([\s\S]*?)```/g,'<pre>$1</pre>').replace(/`([^`\n]+)`/g,'<code>$1</code>')
+ .replace(/^### (.*)$/gm,'<h3>$1</h3>').replace(/^## (.*)$/gm,'<h2>$1</h2>').replace(/^# (.*)$/gm,'<h1>$1</h1>').replace(/^&gt; (.*)$/gm,'<blockquote>$1</blockquote>')
+ .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/__(.+?)__/g,'<u>$1</u>').replace(/\*(.+?)\*/g,'<i>$1</i>').replace(/~~(.+?)~~/g,'<s>$1</s>')
+ .replace(/\|\|(.+?)\|\|/g,'<span class="spoiler">$1</span>').replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+ .replace(/\u0001/g,MENTION).replace(/\n/g,'<br>').replace(/(<\/h\d>|<\/blockquote>|<\/pre>)<br>/g,'$1');
+const plain=s=>fill(s).replace(/\u0001/g,'@'+esc(S.name));
+const v=k=>{const el=f.elements[P+k];return el.type==='checkbox'?el.checked:el.value};
+const now=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('now').textContent=now;
+function upd(){
+ const show=(c,html)=>{$(c).innerHTML=html;$(c).hidden=!html};
+ show('content',md(v('content')));show('title',md(v('title')));show('desc',md(v('description')));
+ $('embed').style.borderColor=v('color');$('author').hidden=!v('show_author');$('author-name').innerHTML=plain(v('author')||'{name}');
+ $('thumb').hidden=!v('thumbnail');
+ const im=v('image');$('image').hidden=!/^https:\/\/\S+$/.test(im);if(!$('image').hidden&&$('image').getAttribute('src')!==im)$('image').src=im;
+ const ft=v('footer'),ts=v('timestamp');show('footer',(ft?plain(ft):'')+(ft&&ts?' • ':'')+(ts?'Today at '+now:''));
+}
+let last=null;ed.querySelectorAll('input:not([type]),textarea').forEach(el=>el.addEventListener('focus',()=>last=el));
+ed.querySelectorAll('[data-ins]').forEach(b=>b.onclick=()=>{const el=last||f.elements[P+'description'],t=b.dataset.ins,s=el.selectionStart??el.value.length;
+ el.value=el.value.slice(0,s)+t+el.value.slice(el.selectionEnd??s);el.focus();el.selectionStart=el.selectionEnd=s+t.length;upd()});
+f.addEventListener('input',upd);f.addEventListener('change',upd);upd();
+});
+</script>"""
+
 CSS = """:root{--bg:#0e1319;--side:#0a0e13;--card:#161c25;--line:#232c39;--tx:#dce3ec;--mu:#8190a3;--gold:#F0C35A;--win:#4fc98a;--loss:#e5636d;--r:12px}
 *{box-sizing:border-box;margin:0}
 body{background:var(--bg);color:var(--tx);font:14px/1.45 Inter,system-ui,sans-serif;min-height:100vh}
@@ -387,6 +456,26 @@ figcaption{text-align:center;color:var(--mu);font-size:12px}
 .raw summary{color:var(--mu);cursor:pointer;font-size:12px}.pager{display:flex;justify-content:space-between;margin:14px 0}
 main.wide{max-width:none}
 @media(max-width:820px){.ev>summary{grid-template-columns:1fr auto}.ev .sm{grid-column:1/-1}.ba{grid-template-columns:1fr}}
+label.check{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--tx);cursor:pointer}label.check input{width:auto}
+input[type=color]{height:38px;padding:3px;cursor:pointer}.phs{margin:12px 0 4px;font-size:12px;color:var(--mu)}
+.ins{background:var(--bg);border:1px solid var(--line);color:var(--gold);border-radius:6px;padding:2px 7px;margin:0 2px;cursor:pointer;font:12px ui-monospace,Consolas,monospace}
+.ed{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}.ed .pv{position:sticky;top:16px}
+.dc{background:#313338;border-radius:8px;padding:16px 16px 20px 0;font:16px/1.375 "gg sans","Noto Sans",Inter,system-ui,sans-serif;color:#dbdee1}
+.dc-msg{display:flex;gap:16px;padding-left:16px}.dc-av{width:40px;height:40px;border-radius:50%;flex:none}.dc-body{min-width:0;flex:1}
+.dc-name{font-weight:500;color:#f2f3f5;margin-right:4px}.dc-bot{background:#5865f2;color:#fff;font-size:10px;font-weight:600;padding:1px 4px;border-radius:3px;vertical-align:2px;margin-right:6px}
+.dc-time{font-size:12px;color:#949ba4}.dc-content{word-wrap:break-word}
+.dc-embed{display:flex;gap:16px;max-width:432px;background:#2b2d31;border-left:4px solid;border-radius:4px;padding:8px 16px 16px 12px;margin-top:4px}
+.dc-emain{min-width:0;flex:1}.dc-author{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;font-weight:600;color:#f2f3f5}.dc-author img{width:24px;height:24px;border-radius:50%}
+.dc-title{margin-top:8px;font-size:16px;font-weight:600;color:#f2f3f5}.dc-desc{margin-top:8px;font-size:14px;word-wrap:break-word}
+.dc-thumb{width:80px;height:80px;border-radius:4px;object-fit:cover;margin-top:8px;flex:none}.dc-image{display:block;max-width:100%;border-radius:4px;margin-top:16px}
+.dc-footer{margin-top:8px;font-size:12px;color:#b5bac1}
+.dc .mention{background:rgba(88,101,242,.3);color:#c9cdfb;border-radius:3px;padding:0 2px;font-weight:500}
+.dc code{background:#1e1f22;border-radius:4px;padding:0 3px;font-size:85%}.dc pre{background:#1e1f22;border:1px solid #1e1f22;color:#dbdee1;margin:4px 0}
+.dc h1,.dc h2,.dc h3{color:#f2f3f5;font-weight:700;margin:8px 0 4px;line-height:1.3}.dc h1{font-size:24px}.dc h2{font-size:20px}.dc h3{font-size:16px}
+.dc blockquote{border-left:4px solid #4e5058;padding-left:12px}.dc a{color:#00a8fc;text-decoration:none}
+.dc .spoiler{background:#1e1f22;color:transparent;border-radius:3px}.dc .spoiler:hover{color:inherit}
+[hidden]{display:none!important}
+@media(max-width:1100px){.ed{grid-template-columns:1fr}.ed .pv{position:static}}
 .solo{max-width:420px;margin:12vh auto;padding:0 16px;text-align:center}.solo .logo{font-size:26px;padding:0 0 18px}
 @media(max-width:820px){#top{display:flex}#side{transform:translateX(-100%)}#side.open{transform:none;box-shadow:0 0 0 100vmax #0009}main{margin:0;padding:20px 16px}}"""
 
@@ -410,7 +499,7 @@ def layout(active, user, body):
 <nav id="side"><div class="logo">THE PITSTOP</div>{''.join(nav_link(t, active) for t in TABS)}
 <div class="pin">{''.join(nav_link(t, active) for t in PINNED)}</div>
 <div class="who"><b>{html.escape(user["name"])}</b><a href="/logout">Log out</a></div></nav>
-<main{' class="wide"' if active == "logs" else ""}><h1>{label}</h1><p class="sub">{subtitle}</p>{body}</main>""")
+<main{' class="wide"' if active in ("logs", "welcome") else ""}><h1>{label}</h1><p class="sub">{subtitle}</p>{body}</main>""")
 
 
 # ---- routes ----
@@ -454,7 +543,7 @@ async def save(request):
             continue
         db.set_setting(app["db"], key, value)
         shown = f"#{names.get(value, value)}" if value else "not set"
-        panel_log(app, user, f"set {LABELS[key]}: {shown}" if key != "welcome_message" else "changed the welcome message")
+        panel_log(app, user, f"set {LABELS[key]}: {shown}" if key != "welcome_embed" else "changed the welcome message")
     tab = posted.get("tab") if posted.get("tab") in BY_SLUG else TABS[0][0]
     raise web.HTTPFound(f"/{tab}?saved")
 
@@ -503,7 +592,9 @@ async def callback(request):
         return html_page('<div class="solo"><div class="logo">THE PITSTOP</div>'
                          + card("No access", "<p>You need Manage Server on the Discord server to use this.</p>") + "</div>")
     # shortcut: permission is checked at login only, so someone who loses Manage Server keeps access until the session ends (12 h)
-    token = sign({"id": me["id"], "name": me.get("global_name") or me["username"], "exp": time.time() + SESSION_TTL}, app["secret"])
+    avatar = f"https://cdn.discordapp.com/avatars/{me['id']}/{me['avatar']}.png" if me.get("avatar") else None
+    token = sign({"id": me["id"], "name": me.get("global_name") or me["username"], "avatar": avatar,
+                  "exp": time.time() + SESSION_TTL}, app["secret"])
     response = web.HTTPFound("/")
     response.set_cookie("session", token, max_age=SESSION_TTL, httponly=True, secure=app["secure"], samesite="Lax")
     response.del_cookie("state")

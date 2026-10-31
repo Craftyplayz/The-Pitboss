@@ -18,7 +18,7 @@ If a dashboard ever writes to the database, set a busy timeout in core/db.py fir
 | Done | # | Feature | Time | Notes |
 |---|---|---|---|---|
 | [x] | 1 | Welcome messages | ~1 hr | No risk. Members intent is already on (bot.py). |
-| [ ] | 2 | Autoroles / button roles | ~1–2 hrs | Use buttons, not emoji reactions. The bot's role must sit above the roles it gives. |
+| [ ] | 2 | Role menus (reaction roles) | ~6 hrs | Full plan below. |
 | [ ] | 3 | Rank roles | ~2 hrs | Give roles from each linked player's Deadlock rank. Reuses the button-role code. |
 
 ## Phase 2: moderation
@@ -68,6 +68,31 @@ If a dashboard ever writes to the database, set a busy timeout in core/db.py fir
 | [ ] | 24 | Music player | ~1 day + regular fixes | Needs ffmpeg and yt-dlp in Docker. YouTube breaks yt-dlp often and bans bot playback in its rules. Builds the voice setup #25 reuses. |
 | [ ] | 25 | Voice transcription | 2–3 days | Hardest. discord.py can't receive voice without an extra library (discord-ext-voice-recv), Whisper is heavy on CPU, and everyone recorded must consent (announce it when recording starts). |
 | [ ] | 26 | Voice summaries | ~2 hrs | After a call, post a short AI summary of the transcript. Needs #25. |
+
+## Role menus (reaction roles)
+
+Admins build a role menu in the Welcome & Roles tab and post it; members click to get or drop roles.
+
+**Already in place:** the embed for each menu reuses `core/embeds.py` and the panel's `embed_editor()` (the same editor and live preview as the welcome message; give each menu its own field prefix).
+
+**How members pick** (chosen per menu):
+- **Buttons** (default): one button per role, click to toggle. Works for everyone, needs no extra permissions, and the bot replies privately with what changed.
+- **Dropdown**: one list, good for 6+ roles (up to 25).
+- **Emoji reactions**: the classic style. Least reliable (reactions made while the bot is offline are missed), so offered but not the default.
+
+**Options per menu:** pick many, pick only one (e.g. main hero), or a min/max; optionally only usable by members who already have a role (e.g. Verified).
+
+**Storage** (core/db.py):
+- `role_menus`: id, channel_id, message_id, mode, min_picks, max_picks, required_role_id, embed (JSON), updated_at
+- `role_menu_options`: menu_id, role_id, label, emoji, description, position
+
+**Panel** (Welcome & Roles tab): a list of menus, then an edit page with the channel, the embed editor, the role list (pick roles from a dropdown, add emoji, label and description, reorder) and the mode. Save posts the message, or edits it if it's already posted.
+
+**How the panel and bot work together, with no link between them:** the panel posts and edits the menu message itself through Discord's API using the bot token, with buttons whose ids look like `rolemenu:<menu>:<role>`. The bot answers those clicks with a discord.py `DynamicItem`, which keeps working after restarts without re-registering anything. Emoji mode: the panel adds the reactions and the bot listens to reaction add and remove.
+
+**Safety:** the panel only lists roles below the bot's highest role, never @everyone or bot-managed roles, and blocks roles with Administrator or any Manage permission. Role changes already show in the Server Log; menu edits show as Control panel entries.
+
+**Build order:** database and shared code (~1 h), bot click handling (~1–2 h), panel list and editor (~2–3 h), emoji mode (~1 h), tests. Rank roles (#3) reuse the role-giving code afterwards.
 
 ## Moderation system
 

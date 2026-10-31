@@ -1,3 +1,4 @@
+import json
 import time
 import unittest
 
@@ -34,12 +35,12 @@ class CanManage(unittest.TestCase):
 class Changes(unittest.TestCase):
     def test_valid(self):
         new = changes({"recap_forum_id": "3", "voice_hub_id": "2", "welcome_channel_id": "4",
-                       "welcome_message": "  hi {user}  "}, CHANNELS)
+                       "embed": "welcome", "embed_title": "  hi {user}  "}, CHANNELS)
         self.assertEqual(new["recap_forum_id"], "3")
         self.assertNotIn("patch_notes_id", new)  # not on this tab's form: left alone
         self.assertEqual(changes({"patch_notes_id": ""}, CHANNELS)["patch_notes_id"], "")  # "Not set" clears it
         self.assertEqual(new["welcome_channel_id"], "4")  # announcement channels count as text
-        self.assertEqual(new["welcome_message"], "hi {user}")
+        self.assertEqual(json.loads(new["welcome_embed"])["title"], "hi {user}")
 
     def test_wrong_type_or_unknown_channel(self):
         with self.assertRaises(web.HTTPBadRequest):
@@ -47,5 +48,5 @@ class Changes(unittest.TestCase):
         with self.assertRaises(web.HTTPBadRequest):
             changes({"welcome_channel_id": "99"}, CHANNELS)
 
-    def test_message_capped(self):
-        self.assertEqual(len(changes({"welcome_message": "x" * 3000}, CHANNELS)["welcome_message"]), 2000)
+    def test_embed_only_from_its_own_form(self):
+        self.assertNotIn("welcome_embed", changes({"embed_title": "x"}, CHANNELS))

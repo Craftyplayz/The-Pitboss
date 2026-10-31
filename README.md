@@ -78,7 +78,7 @@ A dashboard at [pitboss.craftyplayz.com](https://pitboss.craftyplayz.com) with O
 | Command | What it does |
 |---|---|
 | `/setup` | Pick the recap forum, scrim log, patch notes, bot updates and welcome channels, and the voice hub. Leave all options empty to see the current setup |
-| `/welcome message:` | Change the message new members get. Leave it empty to see a preview |
+| `/welcome message:` | Change the welcome embed's main text (design the whole embed in the control panel). Leave it empty to see a preview |
 | `/rebuild-recaps` | Delete every Recap Thread and post all recaps again |
 
 ## Self-hosting

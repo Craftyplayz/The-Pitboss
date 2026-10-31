@@ -8,6 +8,7 @@ Not posted yet: the bot only reads `## ` headings. Becomes a version once approv
 
 - The control panel is now The Pitstop, with a sidebar of tabs: Welcome & Roles, Utility, Leveling, Games, Voice (behind a second password), Translate, Setup and Logs.
 - New Server Log: the bot records what happens in the server (edited and deleted messages, joins and leaves, name, avatar and role changes, statuses, voice, channels, roles, server settings and the audit log). Browse and filter it in the Logs tab, or download it as a spreadsheet.
+- Welcome messages are now embeds. Admins design them in the control panel with a live preview of exactly how they'll look in Discord.
 
 ## 1.7.1
 
