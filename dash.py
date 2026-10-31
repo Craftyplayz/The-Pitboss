@@ -161,6 +161,8 @@ def embed_editor(name, cfg, sample, prefix="embed_", for_member=True):
         return f'<label class="check"><input type="checkbox" name="{prefix}{key}" value="1"{" checked" if cfg.get(key) else ""}>{label}</label>'
 
     places = ("user", "name", "server", "count") if for_member else ("server", "count")
+    link_channel = ('<select class="ins-ch" aria-label="Link a channel"><option value="">Link a channel…</option>'
+                    + "".join(f'<option value="{i}">{e(n)}</option>' for i, n in sample.get("channels", {}).items()) + "</select>")
     inserts = "".join(f'<button type="button" class="ins" data-ins="{{{p}}}">{{{p}}}</button>' for p in places)
     controls = (f'<input type="hidden" name="embed" value="{name}">'
                 + text("content", "Message text (above the embed; put {user} here to ping them)" if for_member else "Message text (above the embed)")
@@ -170,9 +172,9 @@ def embed_editor(name, cfg, sample, prefix="embed_", for_member=True):
                 + (check("thumbnail", "Show their profile picture on the right") if for_member else "")
                 + f'<label for="{prefix}image">Big image (https link)</label><input id="{prefix}image" name="{prefix}image" type="url" maxlength="2000" value="{e(cfg.get("image", ""))}" placeholder="https://...">'
                 + text("footer", "Footer") + check("timestamp", "Show the time in the footer")
-                + f'<p class="phs">Insert where you typed: {inserts}</p>'
+                + f'<p class="phs">Insert where you typed: {inserts} {link_channel}</p>'
                 + ("<p><small>{user} pings them in the message text (inside the embed it shows but doesn't ping). " if for_member else "<p><small>")
-                + ("Formatting works like Discord: **bold**, *italic*, __underline__, ~~strike~~, `code`, # Heading, &gt; quote, [link](https://...).</small></p>"))
+                + ("Formatting works like Discord: **bold**, *italic*, __underline__, ~~strike~~, `code`, # Heading, &gt; quote, [link](https://...). Channel links are clickable in the message text and description.</small></p>"))
     preview = f"""<div class="dc"><div class="dc-msg"><img class="dc-av" src="{BOT_AVATAR}" alt="">
 <div class="dc-body"><div><span class="dc-name">The Pitboss</span><span class="dc-bot">APP</span><span class="dc-time">Today at <span class="pv-now"></span></span></div>
 <div class="dc-content pv-content"></div><div class="dc-embed pv-embed"><div class="dc-emain">
@@ -185,8 +187,10 @@ def embed_editor(name, cfg, sample, prefix="embed_", for_member=True):
 
 async def preview_sample(app, user):
     guild = await guild_info(app)
+    # channels a message can link to, as Discord shows them: #text or 🔊voice (categories can't be linked)
+    channels = {c["id"]: ("🔊" if c["type"] in (2, 13) else "#") + c["name"] for c in await guild_channels(app) if c["type"] != 4}
     return {"name": user["name"], "server": guild["name"], "count": guild.get("approximate_member_count", 0),
-            "avatar": user.get("avatar") or DEFAULT_AVATAR}
+            "avatar": user.get("avatar") or DEFAULT_AVATAR, "channels": channels}
 
 
 def menus_card(app, channels):
@@ -583,7 +587,9 @@ const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&qu
 const MENTION='<span class="mention">@'+esc(S.name)+'</span>';
 // placeholders first (the user mention as a marker), then escape, then Discord's markdown
 const fill=s=>esc(s.replace(/\{user\}/g,'\u0001').replace(/\{name\}/g,S.name).replace(/\{server\}/g,S.server).replace(/\{count\}/g,S.count));
-const md=s=>fill(s).replace(/```(?:\w*\n)?([\s\S]*?)```/g,'<pre>$1</pre>').replace(/`([^`\n]+)`/g,'<code>$1</code>')
+const CH=S.channels||{};
+// links: Discord only makes channel links clickable in the message text and description
+const md=(s,links)=>fill(s).replace(/&lt;#(\d+)&gt;/g,(m,id)=>links?'<span class="mention">'+esc(CH[id]||'#unknown')+'</span>':m).replace(/```(?:\w*\n)?([\s\S]*?)```/g,'<pre>$1</pre>').replace(/`([^`\n]+)`/g,'<code>$1</code>')
  .replace(/^### (.*)$/gm,'<h3>$1</h3>').replace(/^## (.*)$/gm,'<h2>$1</h2>').replace(/^# (.*)$/gm,'<h1>$1</h1>').replace(/^&gt; (.*)$/gm,'<blockquote>$1</blockquote>')
  .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/__(.+?)__/g,'<u>$1</u>').replace(/\*(.+?)\*/g,'<i>$1</i>').replace(/~~(.+?)~~/g,'<s>$1</s>')
  .replace(/\|\|(.+?)\|\|/g,'<span class="spoiler">$1</span>').replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer">$1</a>')
@@ -593,15 +599,17 @@ const v=k=>{const el=f.elements[P+k];return !el?'':el.type==='checkbox'?el.check
 const now=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('now').textContent=now;
 function upd(){
  const show=(c,html)=>{$(c).innerHTML=html;$(c).hidden=!html};
- show('content',md(v('content')));show('title',md(v('title')));show('desc',md(v('description')));
+ show('content',md(v('content'),1));show('title',md(v('title')));show('desc',md(v('description'),1));
  $('embed').style.borderColor=v('color');$('author').hidden=!v('show_author');$('author-name').innerHTML=plain(v('author')||'{name}');
  $('thumb').hidden=!v('thumbnail');
  const im=v('image');$('image').hidden=!/^https:\/\/\S+$/.test(im);if(!$('image').hidden&&$('image').getAttribute('src')!==im)$('image').src=im;
  const ft=v('footer'),ts=v('timestamp');show('footer',(ft?plain(ft):'')+(ft&&ts?' • ':'')+(ts?'Today at '+now:''));
 }
 let last=null;ed.querySelectorAll('input:not([type]),textarea').forEach(el=>el.addEventListener('focus',()=>last=el));
-ed.querySelectorAll('[data-ins]').forEach(b=>b.onclick=()=>{const el=last||f.elements[P+'description'],t=b.dataset.ins,s=el.selectionStart??el.value.length;
- el.value=el.value.slice(0,s)+t+el.value.slice(el.selectionEnd??s);el.focus();el.selectionStart=el.selectionEnd=s+t.length;upd()});
+const put=t=>{const el=last||f.elements[P+'description'],s=el.selectionStart??el.value.length;
+ el.value=el.value.slice(0,s)+t+el.value.slice(el.selectionEnd??s);el.focus();el.selectionStart=el.selectionEnd=s+t.length;upd()};
+ed.querySelectorAll('[data-ins]').forEach(b=>b.onclick=()=>put(b.dataset.ins));
+ed.querySelectorAll('.ins-ch').forEach(c=>c.onchange=()=>{if(c.value)put('<#'+c.value+'>');c.value=''});
 f.addEventListener('input',upd);f.addEventListener('change',upd);upd();
 });
 </script>"""
@@ -679,6 +687,7 @@ main.wide{max-width:none}
 @media(max-width:820px){.ev>summary{grid-template-columns:1fr auto}.ev .sm{grid-column:1/-1}.ba{grid-template-columns:1fr}}
 label.check{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--tx);cursor:pointer}label.check input{width:auto}
 input[type=color]{height:38px;padding:3px;cursor:pointer}.phs{margin:12px 0 4px;font-size:12px;color:var(--mu)}
+.ins-ch{width:auto;display:inline-block;padding:2px 6px;margin-left:4px;font-size:12px;color:var(--gold)}
 .ins{background:var(--bg);border:1px solid var(--line);color:var(--gold);border-radius:6px;padding:2px 7px;margin:0 2px;cursor:pointer;font:12px ui-monospace,Consolas,monospace}
 .ed{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start}.ed .pv{position:sticky;top:16px}
 .dc{background:#313338;border-radius:8px;padding:16px 16px 20px 0;font:16px/1.375 "gg sans","Noto Sans",Inter,system-ui,sans-serif;color:#dbdee1}
