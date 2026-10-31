@@ -166,6 +166,9 @@ async def logout(request):
 
 
 def make_app():
+    # docker compose passes an unset variable as "", and an empty secret would make session cookies forgeable
+    if missing := [k for k in ("DISCORD_TOKEN", "GUILD_ID", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET") if not os.environ.get(k)]:
+        raise SystemExit(f"dash: set {', '.join(missing)} (client ID and secret are in Developer Portal > your app > OAuth2)")
     app = web.Application()
     app["db"] = db.connect(os.environ.get("DB_PATH", "data/pitboss.db"))
     app["token"], app["guild_id"] = os.environ["DISCORD_TOKEN"], int(os.environ["GUILD_ID"])

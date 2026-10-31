@@ -2,6 +2,10 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+## 1.7.1
+
+- Control panel: refuses to start without its Discord login settings, instead of showing a broken login.
+
 ## 1.7.0.1
 
 - The control panel is at pitstop.craftyplayz.com.
