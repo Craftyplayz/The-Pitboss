@@ -2,6 +2,10 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+## 1.6.3.5
+
+- Planned features: sorted into the order they'll be built.
+
 ## 1.6.3.4
 
 - Planned features: added level-up cards, voice XP, voice call summaries, event signups and an activity heatmap.
