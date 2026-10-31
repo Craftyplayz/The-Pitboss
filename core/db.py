@@ -57,6 +57,27 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_at ON events (at);
 CREATE INDEX IF NOT EXISTS events_message ON events (message_id);
+CREATE TABLE IF NOT EXISTS role_menus (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id       INTEGER NOT NULL,
+    message_id       INTEGER,           -- NULL until posted
+    mode             TEXT NOT NULL,     -- core.rolemenus.MODES
+    max_picks        INTEGER NOT NULL,  -- 0 no limit, 1 pick only one
+    required_role_id INTEGER,           -- only members with this role can use it
+    button_style     TEXT,
+    placeholder      TEXT,              -- dropdown's empty text
+    embed            TEXT NOT NULL,     -- core.embeds config (JSON)
+    updated_at       INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS role_menu_options (
+    menu_id     INTEGER NOT NULL,
+    position    INTEGER NOT NULL,
+    role_id     INTEGER NOT NULL,
+    emoji       TEXT,
+    label       TEXT NOT NULL,
+    description TEXT,
+    PRIMARY KEY (menu_id, position)
+);
 """
 
 
@@ -222,3 +243,45 @@ def find_events(conn, categories, user=None, channel=None, text=None, since=None
     page = f" AND id < {int(before_id)}" if before_id else ""
     rows = conn.execute(f"SELECT * FROM events WHERE {where}{page} ORDER BY id DESC LIMIT ?", (*args, limit)).fetchall()
     return rows, total
+
+
+MENU_FIELDS = ("channel_id", "message_id", "mode", "max_picks", "required_role_id", "button_style", "placeholder", "embed", "updated_at")
+
+
+def save_menu(conn, menu_id, options, **fields):
+    """Create (menu_id None) or update a role menu and replace its options. Returns the menu id."""
+    with conn:
+        if menu_id is None:
+            cols = [k for k in MENU_FIELDS if k in fields]
+            menu_id = conn.execute(f"INSERT INTO role_menus ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                                   [fields[k] for k in cols]).lastrowid
+        else:
+            cols = [k for k in MENU_FIELDS if k in fields]
+            conn.execute(f"UPDATE role_menus SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?", [*(fields[k] for k in cols), menu_id])
+        if options is not None:
+            conn.execute("DELETE FROM role_menu_options WHERE menu_id = ?", (menu_id,))
+            conn.executemany("INSERT INTO role_menu_options (menu_id, position, role_id, emoji, label, description) VALUES (?, ?, ?, ?, ?, ?)",
+                             [(menu_id, i, o["role_id"], o["emoji"], o["label"], o["description"]) for i, o in enumerate(options)])
+    return menu_id
+
+
+def get_menu(conn, menu_id):
+    return conn.execute("SELECT * FROM role_menus WHERE id = ?", (menu_id,)).fetchone()
+
+
+def menu_for_message(conn, message_id):
+    return conn.execute("SELECT * FROM role_menus WHERE message_id = ?", (message_id,)).fetchone()
+
+
+def role_menus(conn):
+    return conn.execute("SELECT * FROM role_menus ORDER BY id").fetchall()
+
+
+def menu_options(conn, menu_id):
+    return [dict(r) for r in conn.execute("SELECT * FROM role_menu_options WHERE menu_id = ? ORDER BY position", (menu_id,))]
+
+
+def delete_menu(conn, menu_id):
+    with conn:
+        conn.execute("DELETE FROM role_menu_options WHERE menu_id = ?", (menu_id,))
+        conn.execute("DELETE FROM role_menus WHERE id = ?", (menu_id,))

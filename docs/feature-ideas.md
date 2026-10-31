@@ -18,7 +18,7 @@ If a dashboard ever writes to the database, set a busy timeout in core/db.py fir
 | Done | # | Feature | Time | Notes |
 |---|---|---|---|---|
 | [x] | 1 | Welcome messages | ~1 hr | No risk. Members intent is already on (bot.py). |
-| [ ] | 2 | Role menus (reaction roles) | ~6 hrs | Full plan below. |
+| [x] | 2 | Role menus (reaction roles) | ~6 hrs | Full plan below. |
 | [ ] | 3 | Rank roles | ~2 hrs | Give roles from each linked player's Deadlock rank. Reuses the button-role code. |
 
 ## Phase 2: moderation
@@ -80,7 +80,7 @@ Admins build a role menu in the Welcome & Roles tab and post it; members click t
 - **Dropdown**: one list, good for 6+ roles (up to 25).
 - **Emoji reactions**: the classic style. Least reliable (reactions made while the bot is offline are missed), so offered but not the default.
 
-**Options per menu:** pick many, pick only one (e.g. main hero), or a min/max; optionally only usable by members who already have a role (e.g. Verified).
+**Options per menu:** pick many, pick only one (e.g. main hero), or a maximum (a minimum was left out: nobody asked for it); optionally only usable by members who already have a role (e.g. Verified).
 
 **Storage** (core/db.py):
 - `role_menus`: id, channel_id, message_id, mode, min_picks, max_picks, required_role_id, embed (JSON), updated_at

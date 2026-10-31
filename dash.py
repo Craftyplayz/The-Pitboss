@@ -2,6 +2,7 @@
 Run: python dash.py
 
 The bot reads every setting from the shared database when it uses it, so changes apply without a restart."""
+import asyncio
 import base64
 import csv
 import hashlib
@@ -14,13 +15,14 @@ import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import aiohttp
 from aiohttp import web
 
 from cogs.welcome import load as load_welcome
-from core.embeds import LIMITS, clean as clean_embed
+from core import rolemenus
+from core.embeds import GOLD, LIMITS, clean as clean_embed, render as render_embed
 from core import db
 from core.events import CATEGORIES, default_categories
 
@@ -87,6 +89,25 @@ async def discord_get(app, path, auth):
         return await r.json()
 
 
+async def discord_send(app, method, path, payload=None):
+    """A bot call that changes something: (status, JSON body or None). Waits out rate limits a few times."""
+    for _ in range(4):
+        async with app["http"].request(method, DISCORD + path, json=payload, headers={"Authorization": f"Bot {app['token']}"}) as r:
+            body = await r.json() if r.content_type == "application/json" else None
+            if r.status != 429:
+                return r.status, body
+            await asyncio.sleep(min(float((body or {}).get("retry_after", 1)), 10))
+    return r.status, body
+
+
+def discord_error(status, body):
+    return f"Discord said {status}: {(body or {}).get('message', 'no details')}"
+
+
+async def guild_info(app):
+    return await discord_get(app, f"/guilds/{app['guild_id']}?with_counts=true", f"Bot {app['token']}")
+
+
 async def guild_channels(app):
     channels = await discord_get(app, f"/guilds/{app['guild_id']}/channels", f"Bot {app['token']}")
     return sorted(channels, key=lambda c: c.get("position", 0))
@@ -125,9 +146,10 @@ def form(tab, body):
 
 # ---- tabs ----
 
-def embed_editor(name, cfg, sample, prefix="embed_"):
+def embed_editor(name, cfg, sample, prefix="embed_", for_member=True):
     """Form fields for an embed (core.embeds), next to a live preview of how Discord will show it.
-    sample fills the placeholders in the preview: name, server, count and avatar."""
+    sample fills the placeholders in the preview: name, server, count and avatar. for_member: the message is about
+    one member (a welcome), so {user} and {name} make sense."""
     e = html.escape
 
     def text(key, label, rows=0, hint=""):
@@ -138,36 +160,217 @@ def embed_editor(name, cfg, sample, prefix="embed_"):
     def check(key, label):
         return f'<label class="check"><input type="checkbox" name="{prefix}{key}" value="1"{" checked" if cfg.get(key) else ""}>{label}</label>'
 
-    inserts = "".join(f'<button type="button" class="ins" data-ins="{{{p}}}">{{{p}}}</button>' for p in ("user", "name", "server", "count"))
+    places = ("user", "name", "server", "count") if for_member else ("server", "count")
+    inserts = "".join(f'<button type="button" class="ins" data-ins="{{{p}}}">{{{p}}}</button>' for p in places)
     controls = (f'<input type="hidden" name="embed" value="{name}">'
-                + text("content", "Message text (above the embed; put {user} here to ping them)")
-                + check("show_author", "Show their name and picture at the top") + text("author", "Author line", hint="{name}")
+                + text("content", "Message text (above the embed; put {user} here to ping them)" if for_member else "Message text (above the embed)")
+                + (check("show_author", "Show their name and picture at the top") + text("author", "Author line", hint="{name}") if for_member else "")
                 + text("title", "Title") + text("description", "Description", rows=6)
                 + f'<label for="{prefix}color">Colour</label><input type="color" id="{prefix}color" name="{prefix}color" value="{e(cfg.get("color", "#F0C35A"))}">'
-                + check("thumbnail", "Show their profile picture on the right")
+                + (check("thumbnail", "Show their profile picture on the right") if for_member else "")
                 + f'<label for="{prefix}image">Big image (https link)</label><input id="{prefix}image" name="{prefix}image" type="url" maxlength="2000" value="{e(cfg.get("image", ""))}" placeholder="https://...">'
                 + text("footer", "Footer") + check("timestamp", "Show the time in the footer")
                 + f'<p class="phs">Insert where you typed: {inserts}</p>'
-                + "<p><small>{user} pings them in the message text (inside the embed it shows but doesn't ping). "
-                  "Formatting works like Discord: **bold**, *italic*, __underline__, ~~strike~~, `code`, # Heading, &gt; quote, [link](https://...).</small></p>")
+                + ("<p><small>{user} pings them in the message text (inside the embed it shows but doesn't ping). " if for_member else "<p><small>")
+                + ("Formatting works like Discord: **bold**, *italic*, __underline__, ~~strike~~, `code`, # Heading, &gt; quote, [link](https://...).</small></p>"))
     preview = f"""<div class="dc"><div class="dc-msg"><img class="dc-av" src="{BOT_AVATAR}" alt="">
 <div class="dc-body"><div><span class="dc-name">The Pitboss</span><span class="dc-bot">APP</span><span class="dc-time">Today at <span class="pv-now"></span></span></div>
 <div class="dc-content pv-content"></div><div class="dc-embed pv-embed"><div class="dc-emain">
 <div class="dc-author pv-author"><img src="{e(sample["avatar"])}" alt=""><span class="pv-author-name"></span></div>
 <div class="dc-title pv-title"></div><div class="dc-desc pv-desc"></div><img class="dc-image pv-image" alt=""><div class="dc-footer pv-footer"></div></div>
-<img class="dc-thumb pv-thumb" src="{e(sample["avatar"])}" alt=""></div></div></div></div>"""
+<img class="dc-thumb pv-thumb" src="{e(sample["avatar"])}" alt=""></div><div class="pv-extra"></div></div></div></div>"""
     return (f'<div class="ed embed-editor" data-p="{prefix}" data-sample="{e(json.dumps(sample))}"><div>{controls}</div>'
             f'<div class="pv"><label>Preview (how it looks in Discord)</label>{preview}</div></div>')
 
 
+async def preview_sample(app, user):
+    guild = await guild_info(app)
+    return {"name": user["name"], "server": guild["name"], "count": guild.get("approximate_member_count", 0),
+            "avatar": user.get("avatar") or DEFAULT_AVATAR}
+
+
+def menus_card(app, channels):
+    names = {c["id"]: c["name"] for c in channels}
+    rows = "".join(
+        f'<tr><td><a href="/rolemenu/{m["id"]}">{html.escape(json.loads(m["embed"]).get("title") or "Menu " + str(m["id"]))}</a></td>'
+        f'<td>#{html.escape(names.get(str(m["channel_id"]), "deleted channel"))}</td><td>{rolemenus.MODES.get(m["mode"], m["mode"])}</td>'
+        f'<td>{len(db.menu_options(app["db"], m["id"]))}</td><td>{"Posted" if m["message_id"] else "<span class=bad>Not posted</span>"}</td></tr>'
+        for m in db.role_menus(app["db"]))
+    table = (f'<table><tr><th>Menu</th><th>Channel</th><th>Style</th><th>Roles</th><th>Status</th></tr>{rows}</table>' if rows
+             else "<p>No role menus yet. Make one and the bot posts it where you choose; members click to get or drop roles.</p>")
+    return card("Role menus", table + '<a class="btn" href="/rolemenu/new">New role menu</a>')
+
+
 async def welcome_tab(request):
     app, user = request.app, session(request)
-    guild = await discord_get(app, f"/guilds/{app['guild_id']}?with_counts=true", f"Bot {app['token']}")
-    sample = {"name": user["name"], "server": guild["name"], "count": guild.get("approximate_member_count", 0),
-              "avatar": user.get("avatar") or DEFAULT_AVATAR}
-    return form("welcome", card("Welcome channel", channel_select(app, await guild_channels(app), "welcome_channel_id"))
-                + card("Welcome message", embed_editor("welcome", load_welcome(app["db"]), sample))) \
-        + soon("Role menus: members pick roles with buttons", "Rank roles from linked Deadlock accounts") + EDITOR_JS
+    channels = await guild_channels(app)
+    return form("welcome", card("Welcome channel", channel_select(app, channels, "welcome_channel_id"))
+                + card("Welcome message", embed_editor("welcome", load_welcome(app["db"]), await preview_sample(app, user)))) \
+        + menus_card(app, channels) + soon("Rank roles from linked Deadlock accounts") + EDITOR_JS
+
+
+MENU_EMBED = {"content": "", "author": "", "title": "Pick your roles", "description": "Click a role to get it, and click it again to drop it.",
+              "footer": "", "color": GOLD, "image": "", "show_author": False, "thumbnail": False, "timestamp": False}
+
+
+async def menu_context(app):
+    """What the role menu editor offers: (safe roles {id: name} highest first, every role {id: role}, text channels, custom emojis)."""
+    bot, gid = f"Bot {app['token']}", app["guild_id"]
+    if "bot_id" not in app["cache"]:
+        app["cache"]["bot_id"] = (await discord_get(app, "/users/@me", bot))["id"]
+    roles = await discord_get(app, f"/guilds/{gid}/roles", bot)
+    me = await discord_get(app, f"/guilds/{gid}/members/{app['cache']['bot_id']}", bot)
+    by_id = {r["id"]: r for r in sorted(roles, key=lambda r: -r["position"])}
+    top = max((by_id[r]["position"] for r in me["roles"] if r in by_id), default=0)
+    safe_roles = {i: r["name"] for i, r in by_id.items() if rolemenus.safe(r, gid, top)}
+    channels = [c for c in await guild_channels(app) if c["type"] in TEXT]
+    return safe_roles, by_id, channels, await discord_get(app, f"/guilds/{gid}/emojis", bot)
+
+
+def option_row(o, safe_roles, roles):
+    e = html.escape
+    o = o or {"role_id": "", "emoji": "", "label": "", "description": ""}
+    rid = str(o["role_id"])
+    choices = "".join(f'<option value="{i}"{" selected" if i == rid else ""}>{e(n)}</option>' for i, n in safe_roles.items())
+    if rid and rid not in safe_roles:  # saved earlier but no longer allowed: shown so the admin sees why saving fails
+        choices += f'<option value="{e(rid)}" selected>{e(roles.get(rid, {}).get("name", "deleted role"))} (can\'t be given)</option>'
+    return (f'<div class="opt"><select name="opt_role" aria-label="Role"><option value="">Pick a role</option>{choices}</select>'
+            f'<input name="opt_emoji" list="emojis" maxlength="64" placeholder="Emoji" aria-label="Emoji" value="{e(o["emoji"] or "")}">'
+            f'<input name="opt_label" maxlength="80" placeholder="Label (role name if empty)" aria-label="Label" value="{e(o["label"] or "")}">'
+            f'<input name="opt_desc" class="m-dropdown" maxlength="100" placeholder="Description" aria-label="Description" value="{e(o["description"] or "")}">'
+            '<span class="optb"><button type="button" class="ib" data-mv="-1" title="Move up">↑</button>'
+            '<button type="button" class="ib" data-mv="1" title="Move down">↓</button><button type="button" class="ib" data-rm title="Remove">✕</button></span></div>')
+
+
+async def rolemenu_page(request, menu_id=None, menu=None, options=None, cfg=None, message=""):
+    """The role menu editor: from the database, or (after a failed save) from what the admin sent."""
+    app, user = request.app, session(request)
+    if not user:
+        raise web.HTTPFound("/welcome")
+    mid = menu_id or request.match_info["id"]
+    if menu is None:
+        if mid == "new":
+            menu, options, cfg = {"mode": "buttons", "max_picks": 0, "button_style": "2"}, [None], MENU_EMBED
+        else:
+            row = db.get_menu(app["db"], int(mid))
+            if not row:
+                raise web.HTTPNotFound()
+            menu, options, cfg = dict(row), db.menu_options(app["db"], int(mid)), {**MENU_EMBED, **json.loads(row["embed"])}
+    safe_roles, roles, channels, emojis = await menu_context(app)
+    e, mode = html.escape, menu.get("mode", "buttons")
+    channel_opts = "".join(f'<option value="{c["id"]}"{" selected" if c["id"] == str(menu.get("channel_id", "")) else ""}>#{e(c["name"])}</option>' for c in channels)
+    modes = "".join(f'<label class="check"><input type="radio" name="mode" value="{k}"{" checked" if k == mode else ""}>{v}</label>'
+                    for k, v in (("buttons", "Buttons: one per role, click to get it and again to drop it"),
+                                 ("dropdown", "Dropdown: one list, good for lots of roles"),
+                                 ("reactions", "Emoji reactions: the classic style (clicks while the bot is offline are missed)")))
+    need = "".join(f'<option value="{i}"{" selected" if i == str(menu.get("required_role_id") or "") else ""}>{e(r["name"])}</option>'
+                   for i, r in roles.items() if i != str(app["guild_id"]) and not r.get("managed"))
+    styles = "".join(f'<option value="{k}"{" selected" if k == str(menu.get("button_style") or "2") else ""}>{v}</option>' for k, v in rolemenus.BUTTON_STYLES.items())
+    emoji_list = "".join(f'<option value="&lt;{"a" if x.get("animated") else ""}:{e(x["name"])}:{x["id"]}&gt;">:{e(x["name"])}:</option>' for x in emojis)
+    setup_card = card("Where and how", f"""<label for="channel">Post in</label><select id="channel" name="channel"><option value="">Pick a channel</option>{channel_opts}</select>
+<label>How members pick</label>{modes}
+<label for="max_picks">How many roles each member can have from this menu</label>
+<input id="max_picks" name="max_picks" type="number" min="0" max="25" value="{int(menu.get('max_picks') or 0)}">
+<p><small>0 means no limit. 1 means pick only one: picking another swaps it.</small></p>
+<label for="required_role">Who can use it</label><select id="required_role" name="required_role"><option value="">Everyone</option>{need}</select>
+<div class="m-buttons"><label for="button_style">Button colour</label><select id="button_style" name="button_style">{styles}</select></div>
+<div class="m-dropdown"><label for="placeholder">Dropdown text before picking</label><input id="placeholder" name="placeholder" maxlength="150" placeholder="Pick your roles" value="{e(menu.get('placeholder') or '')}"></div>""")
+    roles_card = card("Roles", f"""<div id="opts">{''.join(option_row(o, safe_roles, roles) for o in options or [None])}</div>
+<template id="opt-tpl">{option_row(None, safe_roles, roles)}</template><datalist id="emojis">{emoji_list}</datalist>
+<button type="button" class="btn ghost" id="add-opt">Add a role</button>
+<p><small>Only roles below the bot's highest role and without moderator powers are listed. Emoji: paste one, or pick a server emoji from the list.</small></p>""")
+    delete = (f'<form method="post" action="/rolemenu/{mid}/delete" onsubmit="return confirm(\'Delete this menu and its message in Discord?\')">'
+              '<button class="btn danger" type="submit">Delete menu</button></form>') if mid != "new" else ""
+    body = (message + f'<form method="post" action="/rolemenu/{mid}" id="menu-form" data-mode="{mode}">{setup_card}{roles_card}'
+            + card("Message", embed_editor("menu", cfg, await preview_sample(app, user), for_member=False))
+            + '<button class="btn" type="submit">Save and post</button> <a class="btn ghost" href="/welcome">Back</a></form>'
+            + delete + EDITOR_JS + MENU_JS)
+    return layout("welcome", user, body, "New role menu" if mid == "new" else "Edit role menu",
+                  "Members click to get or drop roles. Saving posts it, or updates it where it already is.")
+
+
+async def post_menu(app, menu_id, old, old_options):
+    """Post the menu, or edit it where it already is. An error message for the admin, or None."""
+    conn = app["db"]
+    menu, options = dict(db.get_menu(conn, menu_id)), db.menu_options(conn, menu_id)
+    guild = await guild_info(app)
+    content, embed = render_embed(json.loads(menu["embed"]), {"server": guild["name"], "count": guild.get("approximate_member_count", 0),
+                                                              "user": "", "name": ""})
+    payload = {"content": content, "embeds": [embed], "components": rolemenus.components(menu, options), "allowed_mentions": {"parse": []}}
+    channel, message_id, status = menu["channel_id"], old and old["message_id"], None
+    if message_id and old["channel_id"] == channel:
+        status, body = await discord_send(app, "PATCH", f"/channels/{channel}/messages/{message_id}", payload)
+        if status >= 300 and status != 404:
+            return discord_error(status, body)
+    elif message_id:  # moved to another channel: take the old message down
+        await discord_send(app, "DELETE", f"/channels/{old['channel_id']}/messages/{message_id}")
+    if status in (None, 404):  # never posted, moved, or someone deleted the message
+        status, body = await discord_send(app, "POST", f"/channels/{channel}/messages", payload)
+        if status >= 300:
+            db.save_menu(conn, menu_id, None, message_id=None)
+            return discord_error(status, body)
+        message_id = int(body["id"])
+        db.save_menu(conn, menu_id, None, message_id=message_id)
+        old_options = []  # a fresh message has no reactions yet
+    reactions = f"/channels/{channel}/messages/{message_id}/reactions"
+    if menu["mode"] != "reactions":
+        if old and old["mode"] == "reactions" and status < 300:
+            await discord_send(app, "DELETE", reactions)  # switched away from reactions: clear them (needs Manage Messages)
+        return None
+    wanted = {rolemenus.emoji_key(rolemenus.parse_emoji(o["emoji"])): rolemenus.parse_emoji(o["emoji"]) for o in options}
+    for o in old_options:
+        gone = rolemenus.parse_emoji(o["emoji"])
+        if gone and rolemenus.emoji_key(gone) not in wanted:
+            await discord_send(app, "DELETE", f"{reactions}/{quote(rolemenus.reaction_path(gone))}")
+    for emoji in wanted.values():
+        status, body = await discord_send(app, "PUT", f"{reactions}/{quote(rolemenus.reaction_path(emoji))}/@me")
+        if status >= 300:
+            return f"Posted, but adding the {emoji['name']} reaction failed. " + discord_error(status, body)
+    return None
+
+
+async def rolemenu_save(request):
+    app, user = request.app, check_post(request)
+    mid = request.match_info["id"]
+    old = None if mid == "new" else db.get_menu(app["db"], int(mid))
+    if mid != "new" and not old:
+        raise web.HTTPNotFound()
+    old_options = db.menu_options(app["db"], old["id"]) if old else []
+    posted = await request.post()
+    cfg = clean_embed(posted)
+    safe_roles, _, channels, _ = await menu_context(app)
+    try:
+        fields, options = rolemenus.clean(posted, safe_roles, {c["id"] for c in channels})
+    except ValueError as err:
+        sent = [{"role_id": r, "emoji": em, "label": la, "description": de} for r, em, la, de in
+                zip(posted.getall("opt_role", []), posted.getall("opt_emoji", []), posted.getall("opt_label", []), posted.getall("opt_desc", []))]
+        menu = {"channel_id": posted.get("channel", ""), "mode": posted.get("mode", "buttons"), "max_picks": posted.get("max_picks", "0"),
+                "required_role_id": posted.get("required_role", ""), "button_style": posted.get("button_style"), "placeholder": posted.get("placeholder")}
+        return await rolemenu_page(request, mid, menu, sent, cfg, f'<p class="bad">Not saved: {html.escape(str(err))}</p>')
+    menu_id = db.save_menu(app["db"], old["id"] if old else None, options, **fields, embed=json.dumps(cfg, ensure_ascii=False),
+                           updated_at=int(time.time()))
+    error = await post_menu(app, menu_id, old, old_options)
+    panel_log(app, user, f"{'updated' if old else 'created'} role menu {menu_id} in #{next((c['name'] for c in channels if c['id'] == str(fields['channel_id'])), '?')}")
+    if error:
+        return await rolemenu_page(request, str(menu_id), message=f'<p class="bad">Saved, but not posted: {html.escape(error)}</p>')
+    raise web.HTTPFound(f"/rolemenu/{menu_id}?saved")
+
+
+async def rolemenu_delete(request):
+    app, user = request.app, check_post(request)
+    menu = db.get_menu(app["db"], int(request.match_info["id"]))
+    if not menu:
+        raise web.HTTPNotFound()
+    if menu["message_id"]:
+        await discord_send(app, "DELETE", f"/channels/{menu['channel_id']}/messages/{menu['message_id']}")  # already gone is fine
+    db.delete_menu(app["db"], menu["id"])
+    panel_log(app, user, f"deleted role menu {menu['id']}")
+    raise web.HTTPFound("/welcome?saved")
+
+
+async def rolemenu_get(request):
+    saved = '<p class="ok">Saved and posted. Members can use it straight away.</p>' if "saved" in request.query else ""
+    return await rolemenu_page(request, message=saved)
 
 
 async def utility_tab(request):
@@ -386,7 +589,7 @@ const md=s=>fill(s).replace(/```(?:\w*\n)?([\s\S]*?)```/g,'<pre>$1</pre>').repla
  .replace(/\|\|(.+?)\|\|/g,'<span class="spoiler">$1</span>').replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noreferrer">$1</a>')
  .replace(/\u0001/g,MENTION).replace(/\n/g,'<br>').replace(/(<\/h\d>|<\/blockquote>|<\/pre>)<br>/g,'$1');
 const plain=s=>fill(s).replace(/\u0001/g,'@'+esc(S.name));
-const v=k=>{const el=f.elements[P+k];return el.type==='checkbox'?el.checked:el.value};
+const v=k=>{const el=f.elements[P+k];return !el?'':el.type==='checkbox'?el.checked:el.value};
 const now=new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});$('now').textContent=now;
 function upd(){
  const show=(c,html)=>{$(c).innerHTML=html;$(c).hidden=!html};
@@ -401,6 +604,24 @@ ed.querySelectorAll('[data-ins]').forEach(b=>b.onclick=()=>{const el=last||f.ele
  el.value=el.value.slice(0,s)+t+el.value.slice(el.selectionEnd??s);el.focus();el.selectionStart=el.selectionEnd=s+t.length;upd()});
 f.addEventListener('input',upd);f.addEventListener('change',upd);upd();
 });
+</script>"""
+
+# role menu editor: add, move and remove role rows, and show the buttons, dropdown or reactions under the preview
+MENU_JS = r"""<script>
+(()=>{const f=document.getElementById('menu-form'),opts=document.getElementById('opts'),tpl=document.getElementById('opt-tpl'),extra=f.querySelector('.pv-extra');
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const emo=t=>{t=(t||'').trim();const m=t.match(/^<(a?):(\w+):(\d+)>$/);return !t?'':m?`<img class="dc-emoji" src="https://cdn.discordapp.com/emojis/${m[3]}.${m[1]?'gif':'webp'}?size=44" alt="">`:`<span>${esc(t)}</span>`};
+const rows=()=>[...opts.querySelectorAll('.opt')].map(r=>{const s=r.querySelector('select');return {role:s.value,name:s.value?s.selectedOptions[0].textContent:'',
+ emoji:r.querySelector('[name=opt_emoji]').value,label:r.querySelector('[name=opt_label]').value}}).filter(o=>o.role);
+function draw(){const mode=f.elements.mode.value;f.dataset.mode=mode;const o=rows();
+ if(mode==='buttons')extra.innerHTML='<div class="dc-btns">'+o.map(x=>`<span class="dc-btn b${f.elements.button_style.value}">${emo(x.emoji)}${esc(x.label||x.name)}</span>`).join('')+'</div>';
+ else if(mode==='dropdown')extra.innerHTML=`<div class="dc-select"><span>${esc(f.elements.placeholder.value||'Pick your roles')}</span><span>&#8964;</span></div>`;
+ else extra.innerHTML='<div class="dc-reacts">'+o.filter(x=>x.emoji).map(x=>`<span class="dc-react">${emo(x.emoji)} 1</span>`).join('')+'</div>';}
+document.getElementById('add-opt').onclick=()=>{opts.appendChild(tpl.content.cloneNode(true));draw()};
+opts.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const r=b.closest('.opt');
+ if('rm' in b.dataset)r.remove();else if(b.dataset.mv==='-1'&&r.previousElementSibling)opts.insertBefore(r,r.previousElementSibling);
+ else if(b.dataset.mv==='1'&&r.nextElementSibling)opts.insertBefore(r.nextElementSibling,r);draw()});
+f.addEventListener('input',draw);f.addEventListener('change',draw);draw();})();
 </script>"""
 
 CSS = """:root{--bg:#0e1319;--side:#0a0e13;--card:#161c25;--line:#232c39;--tx:#dce3ec;--mu:#8190a3;--gold:#F0C35A;--win:#4fc98a;--loss:#e5636d;--r:12px}
@@ -475,6 +696,18 @@ input[type=color]{height:38px;padding:3px;cursor:pointer}.phs{margin:12px 0 4px;
 .dc blockquote{border-left:4px solid #4e5058;padding-left:12px}.dc a{color:#00a8fc;text-decoration:none}
 .dc .spoiler{background:#1e1f22;color:transparent;border-radius:3px}.dc .spoiler:hover{color:inherit}
 [hidden]{display:none!important}
+.btn.danger{background:none;border:1px solid var(--loss);color:var(--loss)}
+.opt{display:grid;grid-template-columns:minmax(0,1.3fr) 130px minmax(0,1fr) minmax(0,1.2fr) auto;gap:8px;margin-bottom:8px;align-items:center}
+#menu-form:not([data-mode=dropdown]) .opt{grid-template-columns:minmax(0,1.3fr) 130px minmax(0,1fr) auto}
+#menu-form:not([data-mode=dropdown]) .m-dropdown,#menu-form:not([data-mode=buttons]) .m-buttons{display:none}
+.optb{display:flex;gap:4px}.ib{background:var(--bg);border:1px solid var(--line);color:var(--mu);border-radius:6px;width:30px;height:34px;cursor:pointer}.ib:hover{color:var(--tx)}
+.dc-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;max-width:440px}
+.dc-btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 16px;border-radius:8px;font-size:14px;font-weight:500;color:#fff}
+.b1{background:#5865f2}.b2{background:#4e5058}.b3{background:#248046}.b4{background:#da373c}
+.dc-emoji{width:20px;height:20px;object-fit:contain}.dc-react .dc-emoji{width:16px;height:16px}
+.dc-select{display:flex;justify-content:space-between;max-width:400px;margin-top:8px;background:#1e1f22;border-radius:8px;padding:10px 12px;color:#949ba4;font-size:14px}
+.dc-reacts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.dc-react{display:inline-flex;align-items:center;gap:6px;background:#2b2d31;border-radius:8px;padding:2px 8px;font-size:14px;color:#dbdee1}
+@media(max-width:820px){.opt,#menu-form:not([data-mode=dropdown]) .opt{grid-template-columns:1fr 1fr}}
 @media(max-width:1100px){.ed{grid-template-columns:1fr}.ed .pv{position:static}}
 .solo{max-width:420px;margin:12vh auto;padding:0 16px;text-align:center}.solo .logo{font-size:26px;padding:0 0 18px}
 @media(max-width:820px){#top{display:flex}#side{transform:translateX(-100%)}#side.open{transform:none;box-shadow:0 0 0 100vmax #0009}main{margin:0;padding:20px 16px}}"""
@@ -493,8 +726,9 @@ def nav_link(tab, active):
     return f'<a class="nav{" on" if slug == active else ""}" href="/{slug}"><svg viewBox="0 0 24 24">{ICONS.get(slug, "")}</svg>{label}</a>'
 
 
-def layout(active, user, body):
-    slug, label, subtitle, _ = BY_SLUG[active]
+def layout(active, user, body, label=None, subtitle=None):
+    _, tab_label, tab_subtitle, _ = BY_SLUG[active]
+    label, subtitle = label or tab_label, subtitle or tab_subtitle
     return html_page(f"""<div id="top"><button onclick="side.classList.toggle('open')" aria-label="Menu">☰</button><b style="font:700 16px Cinzel,serif;color:var(--gold)">THE PITSTOP</b></div>
 <nav id="side"><div class="logo">THE PITSTOP</div>{''.join(nav_link(t, active) for t in TABS)}
 <div class="pin">{''.join(nav_link(t, active) for t in PINNED)}</div>
@@ -620,6 +854,7 @@ def make_app():
     app["voice_password"] = os.environ.get("VOICE_PASSWORD", "")  # empty keeps the voice tab locked for everyone
     app["url"] = os.environ.get("DASH_URL", "https://pitstop.craftyplayz.com").rstrip("/")
     app["secure"] = app["url"].startswith("https://")
+    app["cache"] = {}  # looked up once: the bot's user id
     app["files"] = Path(os.environ.get("DB_PATH", "data/pitboss.db")).parent / "logfiles"  # saved by cogs/logs.py
 
     async def start(app):
@@ -635,6 +870,8 @@ def make_app():
                     web.get("/callback", callback), web.get("/logout", logout),
                     web.post("/voice/unlock", voice_unlock), web.get("/voice/lock", voice_lock),
                     web.get("/logs/export", logs_export), web.get("/logs/file/{name}", log_file),
+                    web.get(r"/rolemenu/{id:new|\d+}", rolemenu_get), web.post(r"/rolemenu/{id:new|\d+}", rolemenu_save),
+                    web.post(r"/rolemenu/{id:\d+}/delete", rolemenu_delete),
                     web.get("/{tab}", tab_page)])
     return app
 
