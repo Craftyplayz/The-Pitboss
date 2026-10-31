@@ -11,7 +11,10 @@ from core.shared import SITE_URL
 GUILD = discord.Object(id=int(os.environ["GUILD_ID"]))
 
 intents = discord.Intents.default()
-intents.members = True  # needed for on_member_remove (privileged: enable in Developer Portal)
+# privileged: each must also be switched on in Developer Portal > Bot, or the bot can't connect
+intents.members = True  # joins, leaves, member and profile changes
+intents.message_content = True  # Server Log: what messages said
+intents.presences = True  # Server Log: statuses and activities
 
 # the bot profile's About Me; links in it are clickable, unlike in the status line
 ABOUT = f"Watching your Deadlock matches.\n\nFull stats: {SITE_URL}\nRun /help for a list of commands."
@@ -52,4 +55,7 @@ class Pitboss(commands.Bot):
         print(f"Logged in as {self.user} ({self.user.id})")
 
 
-Pitboss().run(os.environ["DISCORD_TOKEN"])
+try:
+    Pitboss().run(os.environ["DISCORD_TOKEN"])
+except discord.PrivilegedIntentsRequired:
+    raise SystemExit("Turn on Server Members, Message Content and Presence intents in Developer Portal > your app > Bot, then restart.")

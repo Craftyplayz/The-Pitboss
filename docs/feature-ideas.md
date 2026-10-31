@@ -25,7 +25,7 @@ If a dashboard ever writes to the database, set a busy timeout in core/db.py fir
 
 | Done | # | Feature | Time | Notes |
 |---|---|---|---|---|
-| [ ] | 4 | Logging (joins, leaves, deletes, edits, role changes) | ~2–3 hrs | Turns on the Message Content intent, which leveling, starboard and translation need later. Sets up the private mod log channel. |
+| [x] | 4 | Logging (joins, leaves, deletes, edits, role changes) | ~2–3 hrs | Turns on the Message Content intent, which leveling, starboard and translation need later. Sets up the private mod log channel. |
 | [ ] | 5 | Moderation system | ~1–2 days | Full plan below. Posts to the mod log channel from #4. |
 | [ ] | 6 | Automod | ~1–2 hrs | Use Discord's built-in AutoMod for bad words, spam and invite links. Its hits feed the warnings from #5. |
 | [ ] | 7 | Tickets | ~2–3 hrs | Private help threads between a member and the mods. |

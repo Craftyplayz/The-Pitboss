@@ -28,6 +28,11 @@ class Changes(unittest.TestCase):
     def test_sections_newest_first(self):
         self.assertEqual([v for v, _ in sections(LOG)], ["1.5.0", "1.4.1.1", "1.4.1", "1.0.0"])
 
+    def test_unreleased_notes_are_never_posted(self):
+        log = LOG.replace("## 1.5.0", "### Unreleased\n\n- Work in progress.\n\n## 1.5.0")
+        self.assertEqual(sections(log)[0], ("1.5.0", "- Big thing."))
+        self.assertIsNone(changes_since(log, "1.5.0"))
+
     def test_every_version_since_the_last_start(self):
         self.assertEqual(changes_since(LOG, "1.4.1"), ("1.5.0", "- Big thing.\n- Typo fixed."))
 

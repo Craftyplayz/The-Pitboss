@@ -3,14 +3,17 @@ Run: python dash.py
 
 The bot reads every setting from the shared database when it uses it, so changes apply without a restart."""
 import base64
+import csv
 import hashlib
 import hmac
 import html
+import io
 import json
 import os
 import secrets
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlencode
 
 import aiohttp
@@ -18,6 +21,7 @@ from aiohttp import web
 
 from cogs.welcome import DEFAULT as WELCOME_DEFAULT, PLACEHOLDERS
 from core import db
+from core.events import CATEGORIES, default_categories
 
 PORT = int(os.environ.get("DASH_PORT", 8643))
 DISCORD = "https://discord.com/api/v10"
@@ -30,6 +34,12 @@ CHANNELS = [("recap_forum_id", "Recap forum", FORUM), ("patch_notes_id", "Patch 
             ("bot_updates_id", "Bot updates", TEXT), ("voice_hub_id", "Voice hub", VOICE),
             ("welcome_channel_id", "Welcome channel", TEXT)]
 LABELS = {key: label for key, label, _ in CHANNELS} | {"welcome_message": "Welcome message"}
+LOG_PAGE = 100  # events per page in the Logs tab
+EXPORT_MAX = 50000  # rows in one CSV download
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+SAFE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+              ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mp3": "audio/mpeg",
+              ".ogg": "audio/ogg", ".wav": "audio/wav"}
 
 
 def sign(data, key):
@@ -160,15 +170,136 @@ async def setup_tab(request):
                               "<p><small>Pick the scrim log with /setup in Discord: it also changes that channel's permissions.</small></p>"))
 
 
+def log_filters(query):
+    """The Logs tab's filters from the URL. No filter submitted yet means the default categories."""
+    picked = [c for c in query.getall("c", []) if c in CATEGORIES] if "f" in query else default_categories()
+    tz = int(query.get("tz", "0")) if query.get("tz", "0").lstrip("-").isdigit() else 0
+
+    def stamp(name):
+        # datetime-local is the viewer's own time; tz is their offset from JS getTimezoneOffset (minutes behind UTC)
+        try:
+            return int(datetime.strptime(query.get(name, ""), "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc).timestamp()) + tz * 60
+        except ValueError:
+            return None
+    return {"categories": picked, "user": query.get("user", "").strip(), "channel": query.get("channel", "").strip(),
+            "text": query.get("q", "").strip(), "since": stamp("from"), "until": stamp("to")}
+
+
+def show_file(f):
+    if not f.get("file"):
+        link = f' <a href="{html.escape(f["url"])}" rel="noreferrer" target="_blank">Discord link</a> (may have expired)' if f.get("url") else ""
+        return f'<li>{html.escape(f.get("name", "file"))} (not saved{", too big" if f.get("size", 0) > 25 << 20 else ""}){link}</li>'
+    src = "/logs/file/" + html.escape(f["file"])
+    image = f'<a href="{src}" target="_blank"><img src="{src}" alt="" loading="lazy"></a>' if f["file"].lower().endswith(IMAGE_EXT) else ""
+    return f'<li>{image}<a href="{src}" target="_blank">{html.escape(f.get("name") or f["file"])}</a></li>'
+
+
+def event_row(r):
+    label, colour, _ = CATEGORIES.get(r["category"], (r["category"], "#8190a3", True))
+    data = json.loads(r["data"] or "{}")
+    e = html.escape
+    bits = []
+    if r["user_name"] or r["user_id"]:
+        bits.append(f'<b>User</b> {e(r["user_name"] or "")} <code>{r["user_id"] or ""}</code>')
+    if r["channel_name"] or r["channel_id"]:
+        bits.append(f'<b>Channel</b> #{e(r["channel_name"] or "")} <code>{r["channel_id"] or ""}</code>')
+    if r["message_id"]:
+        jump = f' <a href="{e(data["jump"])}" target="_blank">open in Discord</a>' if data.get("jump") else ""
+        bits.append(f'<b>Message</b> <code>{r["message_id"]}</code>{jump}')
+    detail = f'<p class="meta">{" · ".join(bits)}</p>' if bits else ""
+    if "before" in data:
+        detail += f'<div class="ba"><div><b>Before</b><pre>{e(str(data["before"] or "(empty)"))}</pre></div><div><b>After</b><pre>{e(data.get("content") or "(empty)")}</pre></div></div>'
+    elif data.get("content"):
+        detail += f'<b>Content</b><pre>{e(data["content"])}</pre>'
+    if data.get("changes"):
+        detail += '<table><tr><th>What</th><th>Before</th><th>After</th></tr>' + "".join(
+            f'<tr><td>{e(k.replace("_", " "))}</td><td>{e(str(a))}</td><td>{e(str(b))}</td></tr>' for k, (a, b) in data["changes"].items()) + "</table>"
+    pics = [(n, data[k]) for n, k in (("Before", "before_file"), ("After", "after_file"), ("Avatar", "avatar")) if data.get(k)]
+    if pics:
+        detail += '<div class="pics">' + "".join(f'<figure><img src="/logs/file/{e(f)}" alt=""><figcaption>{n}</figcaption></figure>' for n, f in pics) + "</div>"
+    if data.get("files"):
+        detail += '<b>Files</b><ul class="files">' + "".join(show_file(f) for f in data["files"]) + "</ul>"
+    for m in data.get("messages", []):
+        detail += f'<pre>{e(str(m.get("author") or "unknown"))}: {e(m.get("content") or "(sent before logging started)")}</pre>'
+    detail += f'<details class="raw"><summary>Raw data</summary><pre>{e(json.dumps(dict(r) | {"data": data}, indent=2, ensure_ascii=False))}</pre></details>'
+    return (f'<details class="ev"><summary><time data-t="{r["at"]}">{datetime.fromtimestamp(r["at"], timezone.utc):%Y-%m-%d %H:%M} UTC</time>'
+            f'<span class="badge" style="--c:{colour}">{e(label)}</span><span class="sm">{e(r["summary"])}</span></summary>'
+            f'<div class="det">{detail}</div></details>')
+
+
 async def logs_tab(request):
-    rows = db.dash_log(request.app["db"])
-    if not rows:
-        body = "<p>Nothing yet. Every change made here is listed, newest first.</p>"
-    else:
-        body = '<table><tr><th>When (UTC)</th><th>Who</th><th>What</th></tr>' + "".join(
-            f'<tr><td>{datetime.fromtimestamp(r["at"], timezone.utc):%Y-%m-%d %H:%M}</td><td>{html.escape(r["user"])}</td>'
-            f'<td>{html.escape(r["action"])}</td></tr>' for r in rows) + "</table>"
-    return card("Control panel changes", body) + soon("Server logs: joins, leaves, deleted and edited messages, role changes")
+    app, query = request.app, request.query
+    filters = log_filters(query)
+    before = query.get("before", "")
+    rows, total = db.find_events(app["db"], filters["categories"], filters["user"], filters["channel"], filters["text"],
+                                 filters["since"], filters["until"], int(before) if before.isdigit() else None, LOG_PAGE)
+    chips = "".join(f'<label class="chip" style="--c:{colour}"><input type="checkbox" name="c" value="{key}"'
+                    f'{" checked" if key in filters["categories"] else ""}><span>{label}</span></label>'
+                    for key, (label, colour, _) in CATEGORIES.items())
+    v = lambda name: html.escape(query.get(name, ""))  # noqa: E731
+    kept = [(k, val) for k, val in query.items() if k not in ("before", "format")]
+    older = (f'<a class="btn ghost" href="/logs?{urlencode(kept + [("before", rows[-1]["id"])])}">Older →</a>'
+             if len(rows) == LOG_PAGE else "")
+    newest = f'<a class="btn ghost" href="/logs?{urlencode(kept)}">← Newest</a>' if before else ""
+    filters_card = f"""<form method="get" action="/logs" id="lf" class="card"><input type="hidden" name="f" value="1"><input type="hidden" name="tz" id="tz">
+<div class="chips">{chips}</div>
+<div class="chiprow"><button type="button" class="link" data-all="1">Select all</button> · <button type="button" class="link" data-all="0">Select none</button></div>
+<div class="fgrid"><div><label for="q">Search text</label><input id="q" name="q" value="{v('q')}" placeholder="Words in the event or message"></div>
+<div><label for="user">User</label><input id="user" name="user" value="{v('user')}" placeholder="Name or ID"></div>
+<div><label for="channel">Channel</label><input id="channel" name="channel" value="{v('channel')}" placeholder="Name or ID"></div>
+<div><label for="from">From</label><input id="from" name="from" type="datetime-local" value="{v('from')}"></div>
+<div><label for="to">To</label><input id="to" name="to" type="datetime-local" value="{v('to')}"></div></div>
+<button class="btn" type="submit">Apply filters</button> <a class="btn ghost" href="/logs">Reset</a>
+<a class="btn ghost" href="/logs/export?{urlencode(kept)}">Download CSV</a>
+<label class="auto"><input type="checkbox" id="auto"> Auto-refresh every 15 s</label></form>"""
+    script = """<script>
+document.querySelectorAll('time[data-t]').forEach(t=>{t.textContent=new Date(t.dataset.t*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'medium'})});
+tz.value=new Date().getTimezoneOffset();
+document.querySelectorAll('[data-all]').forEach(b=>b.onclick=()=>document.querySelectorAll('.chip input').forEach(i=>i.checked=b.dataset.all==='1'));
+let A=false;try{A=localStorage.getItem('pitstop-auto')==='1'}catch(e){}auto.checked=A;
+auto.onchange=()=>{try{localStorage.setItem('pitstop-auto',auto.checked?'1':'0')}catch(e){}location.reload()};
+if(A&&!location.search.includes('before='))setTimeout(()=>location.reload(),15000);
+</script>"""
+    events = "".join(event_row(r) for r in rows) or '<p class="empty">No events match these filters.</p>'
+    return (filters_card + f'<p class="count">{total:,} matching event{"s" if total != 1 else ""}. Click one for the details.</p>'
+            + f'<div class="evs">{events}</div><div class="pager">{newest}{older}</div>' + script)
+
+
+async def logs_export(request):
+    if not session(request):
+        raise web.HTTPForbidden()
+    filters = log_filters(request.query)
+    rows, _ = db.find_events(request.app["db"], filters["categories"], filters["user"], filters["channel"], filters["text"],
+                             filters["since"], filters["until"], limit=EXPORT_MAX)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["time_utc", "category", "kind", "user", "user_id", "channel", "channel_id", "message_id", "summary", "data"])
+    for r in rows:
+        w.writerow([datetime.fromtimestamp(r["at"], timezone.utc).isoformat(), r["category"], r["kind"], r["user_name"], r["user_id"],
+                    r["channel_name"], r["channel_id"], r["message_id"], r["summary"], r["data"]])
+    return web.Response(text=out.getvalue(), content_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="pitstop-logs-{time.strftime("%Y%m%d-%H%M")}.csv"'})
+
+
+async def log_file(request):
+    """A file the Server Log saved. Only images, video and audio open in the browser; anything else downloads,
+    and the sandbox header stops an uploaded page from running as this site."""
+    if not session(request):
+        raise web.HTTPForbidden()
+    base = request.app["files"].resolve()
+    path = (base / request.match_info["name"]).resolve()
+    if path.parent != base or not path.is_file():
+        raise web.HTTPNotFound()
+    kind = SAFE_TYPES.get(path.suffix.lower())
+    headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox", "Content-Type": kind or "application/octet-stream"}
+    if not kind:
+        headers["Content-Disposition"] = f'attachment; filename="{path.name}"'
+    return web.FileResponse(path, headers=headers)
+
+
+def panel_log(app, user, action):
+    db.add_event(app["db"], int(time.time()), "panel_change", "panel", f"{user['name']} {action}",
+                 user_id=int(user["id"]), user_name=user["name"])
 
 
 ICONS = {
@@ -193,7 +324,7 @@ TABS = [
 # Always at the bottom of the sidebar, in this order.
 PINNED = [
     ("setup", "Setup", "Which channels the bot uses", setup_tab),
-    ("logs", "Logs", "Everything that changed, newest first", logs_tab),
+    ("logs", "Logs", "Everything that happens in the server, newest first", logs_tab),
 ]
 BY_SLUG = {t[0]: t for t in TABS + PINNED}
 
@@ -227,6 +358,29 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;colo
 th,td{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
 .btn{display:inline-block;margin-top:12px;background:var(--gold);color:#111;border:0;border-radius:8px;padding:10px 18px;font:600 14px Inter,system-ui,sans-serif;cursor:pointer;text-decoration:none}
 .btn:hover{filter:brightness(1.08)} form{margin-bottom:24px}
+.btn.ghost{background:none;color:var(--tx);border:1px solid var(--line)} .link{background:none;border:0;color:var(--gold);cursor:pointer;font:inherit;padding:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{margin:0;text-transform:none;letter-spacing:0}.chip input{display:none}.chiprow{margin:8px 0 4px;font-size:12px;color:var(--mu)}
+.chip span{display:inline-block;padding:5px 11px;border-radius:99px;border:1px solid var(--line);color:var(--mu);cursor:pointer;font-size:13px;user-select:none}
+.chip input:checked+span{border-color:var(--c);color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}
+.chip input:focus-visible+span{outline:2px solid var(--gold)}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 12px}
+.auto{display:inline-flex;align-items:center;gap:6px;margin:12px 0 0 8px;text-transform:none;letter-spacing:0;font-size:13px}.auto input{width:auto}
+.count{color:var(--mu);margin:-4px 0 10px}.empty{color:var(--mu);padding:20px 0}
+.evs{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--card)}
+.ev{border-bottom:1px solid var(--line)}.ev:last-child{border-bottom:0}
+.ev>summary{display:grid;grid-template-columns:150px 130px minmax(0,1fr);gap:10px;align-items:baseline;padding:9px 14px;cursor:pointer;list-style:none}
+.ev>summary::-webkit-details-marker{display:none}.ev>summary:hover{background:#1a212c}.ev[open]>summary{background:#1c2430}
+.ev time{color:var(--mu);font-size:12px;white-space:nowrap}.sm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ev[open] .sm{white-space:normal}
+.badge{justify-self:start;font-size:11px;padding:2px 8px;border-radius:99px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);white-space:nowrap}
+.det{padding:4px 14px 14px;font-size:13px}.det b{color:var(--mu);font-weight:500}.meta{color:var(--mu);margin:6px 0 10px}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:4px 0 10px;font:12px/1.5 ui-monospace,Consolas,monospace}
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:10px}.det table{margin:4px 0 10px}
+.pics{display:flex;gap:14px;margin:6px 0 10px}.pics img{width:96px;height:96px;border-radius:50%;object-fit:cover;border:1px solid var(--line)}
+figcaption{text-align:center;color:var(--mu);font-size:12px}
+.files{list-style:none;padding:0}.files li{margin:6px 0}.files img{display:block;max-width:320px;max-height:240px;border-radius:8px;margin-bottom:4px}
+.raw summary{color:var(--mu);cursor:pointer;font-size:12px}.pager{display:flex;justify-content:space-between;margin:14px 0}
+main.wide{max-width:none}
+@media(max-width:820px){.ev>summary{grid-template-columns:1fr auto}.ev .sm{grid-column:1/-1}.ba{grid-template-columns:1fr}}
 .solo{max-width:420px;margin:12vh auto;padding:0 16px;text-align:center}.solo .logo{font-size:26px;padding:0 0 18px}
 @media(max-width:820px){#top{display:flex}#side{transform:translateX(-100%)}#side.open{transform:none;box-shadow:0 0 0 100vmax #0009}main{margin:0;padding:20px 16px}}"""
 
@@ -250,7 +404,7 @@ def layout(active, user, body):
 <nav id="side"><div class="logo">THE PITSTOP</div>{''.join(nav_link(t, active) for t in TABS)}
 <div class="pin">{''.join(nav_link(t, active) for t in PINNED)}</div>
 <div class="who"><b>{html.escape(user["name"])}</b><a href="/logout">Log out</a></div></nav>
-<main><h1>{label}</h1><p class="sub">{subtitle}</p>{body}</main>""")
+<main{' class="wide"' if active == "logs" else ""}><h1>{label}</h1><p class="sub">{subtitle}</p>{body}</main>""")
 
 
 # ---- routes ----
@@ -293,8 +447,8 @@ async def save(request):
         if value == (db.get_setting(app["db"], key) or ""):
             continue
         db.set_setting(app["db"], key, value)
-        shown = "changed" if key == "welcome_message" else f"set to #{names.get(value, value)}" if value else "cleared"
-        db.log_dash(app["db"], int(time.time()), user["name"], f"{LABELS[key]} {shown}")
+        shown = f"#{names.get(value, value)}" if value else "not set"
+        panel_log(app, user, f"set {LABELS[key]}: {shown}" if key != "welcome_message" else "changed the welcome message")
     tab = posted.get("tab") if posted.get("tab") in BY_SLUG else TABS[0][0]
     raise web.HTTPFound(f"/{tab}?saved")
 
@@ -303,9 +457,9 @@ async def voice_unlock(request):
     app, user = request.app, check_post(request)
     password = (await request.post()).get("password", "")
     if not app["voice_password"] or not hmac.compare_digest(password.encode(), app["voice_password"].encode()):
-        db.log_dash(app["db"], int(time.time()), user["name"], "Wrong voice tab password")
+        panel_log(app, user, "typed a wrong Voice tab password")
         raise web.HTTPFound("/voice?wrong")
-    db.log_dash(app["db"], int(time.time()), user["name"], "Unlocked the voice tab")
+    panel_log(app, user, "unlocked the Voice tab")
     response = web.HTTPFound("/voice")
     response.set_cookie("voice", sign({"id": user["id"], "exp": time.time() + VOICE_TTL}, app["secret"]),
                         max_age=VOICE_TTL, httponly=True, secure=app["secure"], samesite="Lax")
@@ -369,6 +523,7 @@ def make_app():
     app["voice_password"] = os.environ.get("VOICE_PASSWORD", "")  # empty keeps the voice tab locked for everyone
     app["url"] = os.environ.get("DASH_URL", "https://pitstop.craftyplayz.com").rstrip("/")
     app["secure"] = app["url"].startswith("https://")
+    app["files"] = Path(os.environ.get("DB_PATH", "data/pitboss.db")).parent / "logfiles"  # saved by cogs/logs.py
 
     async def start(app):
         app["http"] = aiohttp.ClientSession()
@@ -382,6 +537,7 @@ def make_app():
     app.add_routes([web.get("/", index), web.post("/save", save), web.get("/login", login),
                     web.get("/callback", callback), web.get("/logout", logout),
                     web.post("/voice/unlock", voice_unlock), web.get("/voice/lock", voice_lock),
+                    web.get("/logs/export", logs_export), web.get("/logs/file/{name}", log_file),
                     web.get("/{tab}", tab_page)])
     return app
 

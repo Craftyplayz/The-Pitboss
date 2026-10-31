@@ -6,6 +6,8 @@
 
 Never ask for commits that only touch `mockups/` or the admin panel: those never get a version or changelog entry.
 
+**Unreleased notes:** while the user is still working on something, keep its notes under a `### Unreleased` heading at the top of CHANGELOG.md, above the first `## ` version. The bot only reads `## ` headings, so nothing there is posted. When the user approves, turn it into `## <version>` (or fold it into the next version) and remove the heading.
+
 Versions look like `1.A.B.C`. Bump exactly one part per versioned commit and reset the parts after it to 0. Drop a trailing `.0` (write `1.5.0`, not `1.5.0.0`):
 
 | Change | Bump | Example |

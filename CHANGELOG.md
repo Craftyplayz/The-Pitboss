@@ -2,6 +2,13 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+### Unreleased
+
+Not posted yet: the bot only reads `## ` headings. Becomes a version once approved.
+
+- The control panel is now The Pitstop, with a sidebar of tabs: Welcome & Roles, Utility, Leveling, Games, Voice (behind a second password), Translate, Setup and Logs.
+- New Server Log: the bot records what happens in the server (edited and deleted messages, joins and leaves, name, avatar and role changes, statuses, voice, channels, roles, server settings and the audit log). Browse and filter it in the Logs tab, or download it as a spreadsheet.
+
 ## 1.7.1
 
 - Control panel: refuses to start without its Discord login settings, instead of showing a broken login.

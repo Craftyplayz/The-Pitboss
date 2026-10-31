@@ -87,7 +87,8 @@ The Pitboss is built for one Discord server. It runs as three services that shar
 
 ### Requirements
 - Docker and Docker Compose, **or** Python 3.12
-- A Discord bot token with the **Server Members** privileged intent turned on in the Developer Portal
+- A Discord bot token with the **Server Members**, **Message Content** and **Presence** privileged intents turned on in the Developer Portal (Bot page)
+- For the Server Log's audit entries (who kicked, banned or deleted what), give the bot the **View Audit Log** permission
 
 ### 1. Configure
 Copy `.env.example` to `.env` and fill it in:
@@ -117,7 +118,7 @@ python bot.py
 python web.py
 python dash.py
 ```
-The database is stored at `data/pitboss.db` (change it with `DB_PATH`).
+The database is stored at `data/pitboss.db` (change it with `DB_PATH`). Files the Server Log saves (attachments, avatars) go in `data/logfiles/`.
 
 ### 3. Set up the channels
 In Discord, run `/setup` and pick the recap forum, scrim log, patch notes, bot updates and welcome channels, and the voice hub. Change the welcome message with `/welcome`.
@@ -134,7 +135,7 @@ python -m unittest
 | `bot.py` | Starts the Discord bot |
 | `web.py`, `admin.py` | The website and the `/admin` page |
 | `dash.py` | The control panel: Discord login and bot settings |
-| `cogs/` | Bot commands and background tasks (recaps, scrims, patch notes, bot updates) |
+| `cogs/` | Bot commands and background tasks (recaps, scrims, patch notes, bot updates, the Server Log) |
 | `core/` | Shared code: Deadlock API client, database, stats, graphs, trophies |
 | `pages/`, `static/` | Website page and images |
 | `tests/` | Unit tests |

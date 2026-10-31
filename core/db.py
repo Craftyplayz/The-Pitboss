@@ -42,11 +42,21 @@ CREATE TABLE IF NOT EXISTS scrim_players (
     joined_at INTEGER NOT NULL,
     PRIMARY KEY (scrim_id, member_id)
 );
-CREATE TABLE IF NOT EXISTS dash_log (
-    at      INTEGER NOT NULL,  -- unix seconds
-    user    TEXT NOT NULL,     -- Discord name of whoever used the control panel
-    action  TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    at           INTEGER NOT NULL,  -- unix seconds
+    kind         TEXT NOT NULL,     -- core.events.KINDS, e.g. message_deleted
+    category     TEXT NOT NULL,     -- core.events.CATEGORIES
+    user_id      INTEGER,           -- who it happened to or who did it
+    user_name    TEXT,              -- "Display (@username)" at the time
+    channel_id   INTEGER,
+    channel_name TEXT,
+    message_id   INTEGER,
+    summary      TEXT NOT NULL,     -- one readable line
+    data         TEXT               -- JSON details: content, before/after, saved files
 );
+CREATE INDEX IF NOT EXISTS events_at ON events (at);
+CREATE INDEX IF NOT EXISTS events_message ON events (message_id);
 """
 
 
@@ -168,11 +178,47 @@ def set_scrim_teams(conn, scrim_id, teams):
                          [(t, scrim_id, m) for m, t in teams.items()])
 
 
-def log_dash(conn, at, user, action):
+
+def add_event(conn, at, kind, category, summary, user_id=None, user_name=None, channel_id=None, channel_name=None,
+              message_id=None, data=None):
     with conn:
-        conn.execute("INSERT INTO dash_log (at, user, action) VALUES (?, ?, ?)", (at, user, action))
+        conn.execute("INSERT INTO events (at, kind, category, user_id, user_name, channel_id, channel_name, message_id, summary, data) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     (at, kind, category, user_id, user_name, channel_id, channel_name, message_id, summary,
+                      json.dumps(data, ensure_ascii=False) if data else None))
 
 
-def dash_log(conn, limit=200):
-    """Newest control panel actions first."""
-    return conn.execute("SELECT * FROM dash_log ORDER BY at DESC, rowid DESC LIMIT ?", (limit,)).fetchall()
+def message_history(conn, message_id):
+    """The logged sent and edited events of one message, oldest first; empty if the bot never saw it."""
+    return conn.execute("SELECT * FROM events WHERE message_id = ? AND kind IN ('message_sent', 'message_edited') "
+                        "ORDER BY id", (message_id,)).fetchall()
+
+
+def _event_filter(categories, user, channel, text, since, until):
+    where, args = [f"category IN ({','.join('?' * len(categories))})"], list(categories)
+    for col, value in (("user", user), ("channel", channel)):
+        if value and value.isdigit():
+            where.append(f"{col}_id = ?")
+            args.append(int(value))
+        elif value:
+            where.append(f"{col}_name LIKE ?")
+            args.append(f"%{value}%")
+    if text:
+        where.append("(summary LIKE ? OR data LIKE ?)")
+        args += [f"%{text}%"] * 2
+    if since:
+        where.append("at >= ?")
+        args.append(since)
+    if until:
+        where.append("at < ?")
+        args.append(until)
+    return " AND ".join(where), args
+
+
+def find_events(conn, categories, user=None, channel=None, text=None, since=None, until=None, before_id=None, limit=100):
+    """(matching events newest first, total matching). before_id pages back from an event id."""
+    where, args = _event_filter(categories, user, channel, text, since, until)
+    total = conn.execute(f"SELECT COUNT(*) FROM events WHERE {where}", args).fetchone()[0]
+    page = f" AND id < {int(before_id)}" if before_id else ""
+    rows = conn.execute(f"SELECT * FROM events WHERE {where}{page} ORDER BY id DESC LIMIT ?", (*args, limit)).fetchall()
+    return rows, total
