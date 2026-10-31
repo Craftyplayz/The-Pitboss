@@ -9,6 +9,7 @@ Order rules: safety first, then the cheap features members see on day one, then 
 | Done | # | Feature | Time | Notes |
 |---|---|---|---|---|
 | [x] | 0 | Skip broken cogs | ~10 min | Wrap the cog loading loop in bot.py so one broken cog is skipped instead of stopping the whole bot. |
+| [x] | 0b | Control panel | ~3 hrs | dash.py: Discord login, edit channels and the welcome message. Add each new feature's settings here as it ships. |
 
 If a dashboard ever writes to the database, set a busy timeout in core/db.py first; the bot and web containers share one SQLite file.
 

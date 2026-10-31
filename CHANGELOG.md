@@ -2,33 +2,13 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+## 1.7.0
+
+- New control panel at dash.pitboss.craftyplayz.com: admins log in with Discord and change the bot's channels and welcome message from the browser.
+
 ## 1.6.5
 
 - New members now get a welcome message. Admins pick the channel with /setup and write the message with /welcome.
-
-## 1.6.4
-
-- If one part of the bot fails to load, the rest of the bot still starts instead of the whole bot going offline.
-
-## 1.6.3.5
-
-- Planned features: sorted into the order they'll be built.
-
-## 1.6.3.4
-
-- Planned features: added level-up cards, voice XP, voice call summaries, event signups and an activity heatmap.
-
-## 1.6.3.3
-
-- Planned features: added leveling, auto-translation, birthday roles, marriages and a daily Wordle.
-
-## 1.6.3.2
-
-- Planned features: added a moderation system, a timezone tool and sticky messages.
-
-## 1.6.3.1
-
-- Added a list of planned bot features to the docs.
 
 ## 1.6.3
 

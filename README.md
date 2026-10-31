@@ -83,7 +83,7 @@ A dashboard at [pitboss.craftyplayz.com](https://pitboss.craftyplayz.com) with O
 
 ## Self-hosting
 
-The Pitboss is built for one Discord server. It runs as two services that share one SQLite database: the **bot** (`bot.py`) and the **website** (`web.py`).
+The Pitboss is built for one Discord server. It runs as three services that share one SQLite database: the **bot** (`bot.py`), the **website** (`web.py`) and the **control panel** (`dash.py`), where admins log in with Discord and change the bot's settings.
 
 ### Requirements
 - Docker and Docker Compose, **or** Python 3.12
@@ -99,18 +99,22 @@ Copy `.env.example` to `.env` and fill it in:
 | `DEADLOCK_API_KEY` | No | Raises [deadlock-api.com](https://deadlock-api.com) rate limits |
 | `SITE_URL` | No | The website's public address. Recaps link here |
 | `ADMIN_PASSWORD` | No | Password for `/admin`, the API call log viewer. Leave empty to turn it off |
+| `DISCORD_CLIENT_ID` | For the control panel | Developer Portal > your app > OAuth2 > Client ID |
+| `DISCORD_CLIENT_SECRET` | For the control panel | Developer Portal > your app > OAuth2 > Client Secret |
+| `DASH_URL` | No | The control panel's public address (default `https://dash.pitboss.craftyplayz.com`). Add `<DASH_URL>/callback` as a redirect in Developer Portal > OAuth2 |
 
 ### 2. Run with Docker (recommended)
 ```sh
 docker compose up -d --build
 ```
-The website listens on port `8642`. Put a reverse proxy with HTTPS in front of it. Data is kept in the `pitboss-data` volume.
+The website listens on port `8642` and the control panel on `8643`. Put a reverse proxy with HTTPS in front of both. Data is kept in the `pitboss-data` volume.
 
 ### 2b. Or run with Python
 ```sh
 pip install -r requirements.txt
 python bot.py
 python web.py
+python dash.py
 ```
 The database is stored at `data/pitboss.db` (change it with `DB_PATH`).
 
@@ -128,6 +132,7 @@ python -m unittest
 |---|---|
 | `bot.py` | Starts the Discord bot |
 | `web.py`, `admin.py` | The website and the `/admin` page |
+| `dash.py` | The control panel: Discord login and bot settings |
 | `cogs/` | Bot commands and background tasks (recaps, scrims, patch notes, bot updates) |
 | `core/` | Shared code: Deadlock API client, database, stats, graphs, trophies |
 | `pages/`, `static/` | Website page and images |
