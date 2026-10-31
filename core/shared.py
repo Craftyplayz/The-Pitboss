@@ -4,7 +4,7 @@ import time
 
 WINDOW_DAYS = 30
 WINDOW_MIN_MATCHES = 10
-SITE_URL = os.environ.get("SITE_URL", "https://deadlock.craftyplayz.com").rstrip("/")
+SITE_URL = os.environ.get("SITE_URL", "https://pitboss.craftyplayz.com").rstrip("/")
 
 
 def window_start():

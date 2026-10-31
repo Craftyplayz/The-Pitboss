@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="CHANGELOG.md"><b>📜 Changelog / patch notes</b></a> ·
-  <a href="https://deadlock.craftyplayz.com">🌐 Website</a> ·
+  <a href="https://pitboss.craftyplayz.com">🌐 Website</a> ·
   <a href="#commands">⌨️ Commands</a>
 </p>
 
@@ -56,7 +56,7 @@ Game-wide stats for every Deadlock player over the last 7 days, not just this se
 New Deadlock patch notes are taken from Steam and posted in the patch notes channel. Picking the channel for the first time posts every past patch, oldest first.
 
 ### 🌐 Website
-A dashboard at [deadlock.craftyplayz.com](https://deadlock.craftyplayz.com) with Overview, Leaderboards, Matches, Heroes and Scrims tabs, plus a full profile and trophies page for every linked player.
+A dashboard at [pitboss.craftyplayz.com](https://pitboss.craftyplayz.com) with Overview, Leaderboards, Matches, Heroes and Scrims tabs, plus a full profile and trophies page for every linked player.
 
 ## Commands
 

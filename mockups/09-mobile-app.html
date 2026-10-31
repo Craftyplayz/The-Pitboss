@@ -94,7 +94,7 @@ function leaders(key,n){let s=[...PL].sort((a,b)=>key=='rank'?b.r[0]*10+b.r[1]-a
 function render(){
 const M=D.M,w=M.filter(m=>m.w).length,k=M.reduce((a,m)=>a+m.k,0),d=M.reduce((a,m)=>a+m.d,0),a_=M.reduce((a,m)=>a+m.a,0),spm=Math.round(M.reduce((a,m)=>a+m.nw,0)/M.reduce((a,m)=>a+m.dur/60,0));
 $('swb').innerHTML=`<img src="${cur.av}" alt=""><span>${cur.n}</span> ▾`;
-$('v-home').innerHTML=`<div class="card hero"><h1>The Back Room</h1><p>8 linked players · deadlock.craftyplayz.com</p><div class="grid"><div class="st"><b>${PL.reduce((a,p)=>a+p.g,0)}</b><small>games logged</small></div><div class="st"><b>${Math.round(PL.reduce((a,p)=>a+p.wr,0)/PL.length)}%</b><small>server win rate</small></div><div class="st"><b>${hn(D.HS[0].h)}</b><small>most played</small></div></div></div>
+$('v-home').innerHTML=`<div class="card hero"><h1>The Back Room</h1><p>8 linked players · pitboss.craftyplayz.com</p><div class="grid"><div class="st"><b>${PL.reduce((a,p)=>a+p.g,0)}</b><small>games logged</small></div><div class="st"><b>${Math.round(PL.reduce((a,p)=>a+p.wr,0)/PL.length)}%</b><small>server win rate</small></div><div class="st"><b>${hn(D.HS[0].h)}</b><small>most played</small></div></div></div>
 <h2>Recent matches <a onclick="go('matches')">See all ›</a></h2><div class="car">${M.slice(0,8).map(mcard).join('')}</div>
 <h2>Top of the table <a onclick="go('leaders')">Full board ›</a></h2><div class="card">${leaders('wr',3)}</div>
 <h2>Hero tiles</h2><div class="car">${D.HS.slice(0,6).map(h=>`<div class="tile"><img src="${hc(h.h)}" alt=""><div><b>${hn(h.h)}</b><small>${h.m} games · ${Math.round(h.w/h.m*100)}% WR</small></div></div>`).join('')}</div>`;

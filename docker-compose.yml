@@ -7,7 +7,7 @@ services:
       GUILD_ID: ${GUILD_ID}
       DEADLOCK_API_KEY: ${DEADLOCK_API_KEY:-}
       # recaps link here
-      SITE_URL: ${SITE_URL:-https://deadlock.craftyplayz.com}
+      SITE_URL: ${SITE_URL:-https://pitboss.craftyplayz.com}
     restart: unless-stopped
     volumes:
       - pitboss-data:/app/data
@@ -20,7 +20,7 @@ services:
       WEB_PORT: 8642
       # password for /admin (the API call log viewer); leave empty to turn the page off
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-    # put a reverse proxy (with HTTPS) for deadlock.craftyplayz.com in front of this port
+    # put a reverse proxy (with HTTPS) for pitboss.craftyplayz.com in front of this port
     ports:
       - "8642:8642"
     restart: unless-stopped
