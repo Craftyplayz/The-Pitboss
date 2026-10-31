@@ -16,7 +16,7 @@ If a dashboard ever writes to the database, set a busy timeout in core/db.py fir
 
 | Done | # | Feature | Time | Notes |
 |---|---|---|---|---|
-| [ ] | 1 | Welcome messages | ~1 hr | No risk. Members intent is already on (bot.py). |
+| [x] | 1 | Welcome messages | ~1 hr | No risk. Members intent is already on (bot.py). |
 | [ ] | 2 | Autoroles / button roles | ~1–2 hrs | Use buttons, not emoji reactions. The bot's role must sit above the roles it gives. |
 | [ ] | 3 | Rank roles | ~2 hrs | Give roles from each linked player's Deadlock rank. Reuses the button-role code. |
 

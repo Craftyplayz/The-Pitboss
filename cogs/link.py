@@ -112,12 +112,14 @@ class Link(commands.Cog):
                            scrim_log="Channel where finished scrims are logged, each with a discussion thread",
                            patch_notes="Channel where new Deadlock patch notes are posted",
                            bot_updates="Channel where the bot says what changed after each update",
-                           voice_hub="Voice channel that makes a new Deadlock 1, 2, 3... channel for whoever joins it")
+                           voice_hub="Voice channel that makes a new Deadlock 1, 2, 3... channel for whoever joins it",
+                           welcome="Channel where new members are welcomed (change the message with /welcome)")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.guild_only()
     async def setup_cmd(self, interaction: discord.Interaction, recap_forum: discord.ForumChannel | None = None,
                         scrim_log: discord.TextChannel | None = None, patch_notes: discord.TextChannel | None = None,
-                        bot_updates: discord.TextChannel | None = None, voice_hub: discord.VoiceChannel | None = None):
+                        bot_updates: discord.TextChannel | None = None, voice_hub: discord.VoiceChannel | None = None,
+                        welcome: discord.TextChannel | None = None):
         await interaction.response.defer(ephemeral=True)
         me, lines = interaction.guild.me, []
         if recap_forum:
@@ -158,13 +160,18 @@ class Link(commands.Cog):
             perms = voice_hub.category.permissions_for(me) if voice_hub.category else me.guild_permissions
             if not (perms.manage_channels and perms.move_members):
                 lines[-1] += " Warning: give me Manage Channels and Move Members there."
+        if welcome:
+            db.set_setting(self.bot.db, "welcome_channel_id", welcome.id)
+            lines.append(f"New members will be welcomed in {welcome.mention}. Change the message with /welcome.")
+            if not welcome.permissions_for(me).send_messages:
+                lines[-1] += " Warning: give me Send Messages there."
         if not lines:
             def current(key):
                 cid = db.get_setting(self.bot.db, key)
                 return f"<#{cid}>" if cid else "not set"
             lines = ["Current setup:", f"Recap forum: {current('recap_forum_id')}",
                      f"Scrim log: {current('scrim_log_id')}", f"Patch notes: {current('patch_notes_id')}", f"Bot updates: {current('bot_updates_id')}",
-                     f"Voice hub: {current('voice_hub_id')}"]
+                     f"Voice hub: {current('voice_hub_id')}", f"Welcome: {current('welcome_channel_id')}"]
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     @app_commands.command(name="link", description="Link your Deadlock account to get match recaps.")

@@ -77,7 +77,8 @@ A dashboard at [pitboss.craftyplayz.com](https://pitboss.craftyplayz.com) with O
 
 | Command | What it does |
 |---|---|
-| `/setup` | Pick the recap forum, scrim log, patch notes and bot updates channels, and the voice hub. Leave all options empty to see the current setup |
+| `/setup` | Pick the recap forum, scrim log, patch notes, bot updates and welcome channels, and the voice hub. Leave all options empty to see the current setup |
+| `/welcome message:` | Change the message new members get. Leave it empty to see a preview |
 | `/rebuild-recaps` | Delete every Recap Thread and post all recaps again |
 
 ## Self-hosting
@@ -114,7 +115,7 @@ python web.py
 The database is stored at `data/pitboss.db` (change it with `DB_PATH`).
 
 ### 3. Set up the channels
-In Discord, run `/setup` and pick the recap forum, scrim log, patch notes and bot updates channels, and the voice hub.
+In Discord, run `/setup` and pick the recap forum, scrim log, patch notes, bot updates and welcome channels, and the voice hub. Change the welcome message with `/welcome`.
 
 ## Running the tests
 ```sh
