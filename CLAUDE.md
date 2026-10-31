@@ -2,9 +2,11 @@
 
 ## Versions and patch notes
 
-Every commit gets a new version and an entry in [CHANGELOG.md](CHANGELOG.md), including docs, tests and typo fixes. The only exceptions: commits that only touch `mockups/` or the admin panel get no version bump and no changelog entry, so they never show in the Discord update log.
+**Before every commit, ask the user whether it should get a version and a [CHANGELOG.md](CHANGELOG.md) entry.** Show the bullet you'd write so they can say yes, no or reword it. Changelog entries are posted in the Discord update log, so the user decides what members see. If they say no, commit without a version bump, changelog entry or tag.
 
-Versions look like `1.A.B.C`. Bump exactly one part per commit and reset the parts after it to 0. Drop a trailing `.0` (write `1.5.0`, not `1.5.0.0`):
+Never ask for commits that only touch `mockups/` or the admin panel: those never get a version or changelog entry.
+
+Versions look like `1.A.B.C`. Bump exactly one part per versioned commit and reset the parts after it to 0. Drop a trailing `.0` (write `1.5.0`, not `1.5.0.0`):
 
 | Change | Bump | Example |
 |---|---|---|
