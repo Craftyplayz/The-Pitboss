@@ -153,6 +153,10 @@ def review(conn, client, call):
     clips = [c for c in db.call_clips(conn, call["id"]) if c["text"]]
     if len(clips) < MIN_LINES:
         return db.update_call(conn, call["id"], review_status="short")
+    campaign = db.dnd_channels(conn).get(str(call["channel_id"]))
+    if campaign and not db.call_dnd(conn, call["id"]):
+        db.start_dnd(conn, call["id"], campaign)  # D&D calls get the D&D summary instead (core/dnd.py)
+        return db.update_call(conn, call["id"], review_status="dnd")
     questions = db.call_questions(conn, call["id"])
     round_ = max((q["round"] for q in questions), default=0) + 1
     if round_ > MAX_ROUNDS:
@@ -197,8 +201,16 @@ def step(conn, client):
             db.save_ask(conn, ask["id"], error=str(e)[:500])
             print(f"review: question {ask['id']} failed: {e!r}")
         return True
-    if run := db.next_dnd(conn):
+    if ask := db.next_campaign_ask(conn):
         from core import dnd  # here: core.dnd imports this module
+        try:
+            dnd.answer(conn, client, ask)
+        except Exception as e:  # shortcut: not retried; ask again on the campaign page
+            db.update_campaign_ask(conn, ask["id"], error=str(e)[:500])
+            print(f"review: campaign question {ask['id']} failed: {e!r}")
+        return True
+    if run := db.next_dnd(conn):
+        from core import dnd
         try:
             dnd.turn(conn, client, run)
         except Exception as e:  # the chat stays as it was; the call page's Retry sends the same turn again

@@ -497,7 +497,8 @@ def review_state(call, ready, open_questions, on):
             "questions": f"{open_questions} question{'s' * (open_questions != 1)} waiting",
             "summarise": "Writing summary…", "done": "Summary ready",
             "failed": f'<span class="bad">Failed</span>: {html.escape(call["review_error"] or "")}',
-            "old": "Not reviewed (recorded before reviews)", "short": "Too short to review"}.get(status, status)
+            "old": "Not reviewed (recorded before reviews)", "short": "Too short to review",
+            "dnd": "D&amp;D summary instead (D&amp;D channel)"}.get(status, status)
 
 
 def calls_card(app):
@@ -660,8 +661,8 @@ def review_card(app, call, questions, clips):
     if done:
         body += (f'<details><summary>{len(done)} answered</summary><ul>' + "".join(
             f'<li>{e(q["question"])} <b>{e(q["answer"]) or "Leave as is"}</b></li>' for q in done) + "</ul></details>")
-    if status in ("done", "failed", "old"):
-        body += rerun_button(call, "review", "Review this call" if status == "old" else "Re-run review")
+    if status in ("done", "failed", "old", "dnd"):
+        body += rerun_button(call, "review", {"old": "Review this call", "dnd": "Run the regular review too"}.get(status, "Re-run review"))
     if status == "done":
         body += " " + rerun_button(call, "summary", "Re-run summary")
     return f'<div class="card" id="review"><h2>Review</h2>{body}</div>'
@@ -903,7 +904,7 @@ async def voice_answer(request):
 async def voice_rerun(request):
     app, user, call = posted_call(request)
     what = (await request.post()).get("what")
-    if what == "review" and call["review_status"] in ("done", "failed", "old"):
+    if what == "review" and call["review_status"] in ("done", "failed", "old", "dnd"):
         db.rerun_review(app["db"], call["id"])
     elif what == "summary" and call["review_status"] == "done":
         db.update_call(app["db"], call["id"], review_status="summarise")
@@ -1028,6 +1029,162 @@ async def voice_call_audio(request):
         raise web.HTTPNotFound()
     return web.FileResponse(path, headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox",
                                            "Content-Type": "audio/ogg"})
+
+
+NAME = r"[a-z0-9][a-z0-9-]{0,39}"  # what dnd.CAMPAIGN allows, for routes and form patterns
+
+
+async def dnd_tab(request):
+    """Every campaign with its settings: name, the voice channel whose calls it summarises, delete."""
+    app, e = request.app, html.escape
+    voice = [c for c in await guild_channels(app) if c["type"] in VOICE]
+    mapping = db.dnd_channels(app["db"])
+    out = ""
+    for name in dnd.campaigns():
+        found = dnd.campaign_sessions(app["db"], name)
+        mine = {cid for cid, camp in mapping.items() if camp == name}
+        options = '<option value="">None</option>' + "".join(
+            f'<option value="{c["id"]}"{" selected" if c["id"] in mine else ""}>🔊 {e(c["name"])}</option>' for c in voice)
+        count = f'{len(found)} session{"s" * (len(found) != 1)}' + (f' · last {e(found[-1]["date"])}' if found else "")
+        out += card(f'<a href="/dnd/{name}">{e(name)}</a>',
+                    f'<p><small>{count}</small></p><form method="post" action="/dnd/{name}/settings">'
+                    f'<label>Name</label><input name="name" value="{e(name)}" maxlength="40" pattern="{NAME}" required>'
+                    f'<label>Voice channel</label><select name="channel">{options}</select>'
+                    '<p><small>Calls recorded there skip the regular review: Claude starts this campaign\'s D&amp;D summary '
+                    'instead, and its questions wait on the call page.</small></p><button class="btn" type="submit">Save</button></form>'
+                    f'<form method="post" action="/dnd/{name}/delete" style="display:inline" onsubmit="return confirm('
+                    f'\'Delete {e(name)}? Its session files, summary chats and questions go for good. Calls and transcripts stay.\')">'
+                    '<button class="btn danger" type="submit">Delete campaign</button></form>')
+    new = card("New campaign", f'<form method="post" action="/dnd/new" class="row"><input name="name" maxlength="40" pattern="{NAME}" '
+                               'required placeholder="curse-of-strahd" aria-label="Campaign name"><button class="btn" type="submit">'
+                               'Add</button></form><p><small>Lowercase letters, digits and dashes. A campaign also starts when you '
+                               'type a new name under Summarise with Claude on a call page.</small></p>')
+    return (out or card("Campaigns", "<p>No campaigns yet.</p>")) + new
+
+
+def campaign_name(request):
+    name = request.match_info["name"]
+    if name not in dnd.campaigns():
+        raise web.HTTPNotFound()
+    return name
+
+
+async def dnd_campaign(request):
+    """A campaign's page: ask about it, the cast, the players, the setting, then every session's overview."""
+    app, user, e = request.app, session(request), html.escape
+    if not user:
+        raise web.HTTPFound("/dnd")  # shows the login
+    name = campaign_name(request)
+    found = dnd.campaign_sessions(app["db"], name)
+    memory = (dnd.SESSIONS / name / found[-1]["file"]).read_text(encoding="utf-8") if found else ""
+    parts = dnd.sections(memory)
+
+    def shown(*names):
+        return "".join(f'<h3>{e(n)}</h3><div class="md">{markdown.render(parts[n])}</div>' for n in names if parts.get(n)) \
+            or "<p><small>Nothing saved yet.</small></p>"
+    asks = db.campaign_asks(app["db"], name)
+    waiting = next((a for a in asks if a["answer"] is None and not a["error"]), None)
+
+    def reply(a):
+        if a["answer"] is not None:
+            return f'<div class="md">{markdown.render(a["answer"])}</div>'
+        if a["error"]:
+            return f'<p class="bad">Couldn\'t answer: {e(a["error"])}</p>'
+        return f'<p><i class="wait" id="askstatus">{e(a["progress"] or "Waiting for Claude…")}</i></p>'
+    ask = card("Ask about this campaign",
+               f'<form method="post" action="/dnd/{name}/ask" class="keep"><textarea name="question" maxlength="1000" required '
+               'aria-label="Your question" placeholder="Who gave the party the black orb?"></textarea>'
+               '<p><small>Claude reads the session summaries first, then the transcript of the session most likely to have the '
+               'answer, and the next one, until it finds it.</small></p><button class="btn" type="submit">Ask</button></form>'
+               + "".join(f'<div class="ask"><p class="aq">{e(a["question"])}</p>{reply(a)}</div>' for a in asks))
+    sessions = "".join(
+        f'<div class="ask"><p class="aq">Session {s["number"]}{": " + e(s["title"]) if s["title"] else ""} '
+        f'<small>{e(s["date"])}</small></p>'
+        + (f'<div class="md">{markdown.render(dnd.overview(s["summary"]))}</div>' if s["summary"] else "<p><small>No summary saved.</small></p>")
+        + (f'<p><a href="/voice/call/{s["call_id"]}">Transcript and recording</a></p>' if s["call_id"] else "")
+        + "</div>" for s in reversed(found))
+    edit = (f'<details><summary>Edit {e(found[-1]["file"])}</summary><form method="post" action="/dnd/{name}/memory">'
+            f'<textarea name="text" maxlength="500000" rows="24" aria-label="Memory file">{e(memory)}</textarea>'
+            '<p><small>The next session\'s summary starts from this file, so fixes here stick.</small></p>'
+            '<button class="btn" type="submit">Save</button></form></details>') if found else ""
+    poll = (f"<script>setInterval(async()=>{{const r=await fetch('/dnd/ask/{waiting['id']}.json');if(!r.ok)return;const j=await r.json();"
+            "if(j.done)location.reload();else document.getElementById('askstatus').textContent=j.progress}},2000)</script>"
+            ) if waiting else ""
+    body = (ask + card("DM and characters", shown("Players")) + card("Players", shown("Shared accounts", "Party resources"))
+            + card("Setting", shown("Places and factions", "NPCs", "Plot threads"))
+            + card("Sessions", sessions or "<p>No sessions saved yet. Use Summarise with Claude on a call page.</p>")
+            + card("Memory file", edit or "<p><small>Saved after the first session's summary.</small></p>") + poll)
+    subtitle = f'{len(found)} session{"s" * (len(found) != 1)}' + (f' · last {e(found[-1]["date"])}' if found else "")
+    return layout("dnd", user, body, label=e(name), subtitle=subtitle)
+
+
+async def dnd_new(request):
+    app, user = request.app, check_post(request)
+    name = (await request.post()).get("name", "").strip().lower()
+    if not dnd.CAMPAIGN.fullmatch(name) or name in dnd.campaigns():
+        raise web.HTTPBadRequest(text="Pick a new name: lowercase letters, digits and dashes, up to 40")
+    (dnd.SESSIONS / name).mkdir(parents=True)
+    panel_log(app, user, f"added the D&D campaign {name}")
+    raise web.HTTPFound("/dnd")
+
+
+async def dnd_settings(request):
+    app, user, old = request.app, check_post(request), campaign_name(request)
+    posted = await request.post()
+    name, channel = posted.get("name", "").strip().lower(), posted.get("channel", "")
+    voice = {c["id"]: c["name"] for c in await guild_channels(app) if c["type"] in VOICE}
+    if not dnd.CAMPAIGN.fullmatch(name) or (name != old and name in dnd.campaigns()) or (channel and channel not in voice):
+        raise web.HTTPBadRequest(text="Pick an unused name (lowercase letters, digits and dashes) and a voice channel")
+    if name != old:
+        dnd.rename(app["db"], old, name)
+        panel_log(app, user, f"renamed the D&D campaign {old} to {name}")
+    mapping = {k: v for k, v in db.dnd_channels(app["db"]).items() if v != name and k != channel}  # one campaign per channel
+    if channel:
+        mapping[channel] = name
+    if mapping != db.dnd_channels(app["db"]):
+        db.set_setting(app["db"], "dnd_channels", json.dumps(mapping))
+        panel_log(app, user, f"set the D&D campaign {name}'s channel: " + (f"🔊{voice[channel]}" if channel else "none"))
+    raise web.HTTPFound("/dnd")
+
+
+async def dnd_delete(request):
+    app, user, name = request.app, check_post(request), campaign_name(request)
+    shutil.rmtree(dnd.SESSIONS / name, ignore_errors=True)
+    db.delete_campaign(app["db"], name)
+    panel_log(app, user, f"deleted the D&D campaign {name}")
+    raise web.HTTPFound("/dnd")
+
+
+async def dnd_memory(request):
+    """Save edits to the newest memory file; the next summary starts from it."""
+    app, user, name = request.app, check_post(request), campaign_name(request)
+    found = dnd.campaign_sessions(app["db"], name)
+    text = (await request.post()).get("text", "").replace("\r\n", "\n")
+    if not found or not text.strip() or len(text) > 500000:
+        raise web.HTTPBadRequest(text="Nothing to save")
+    (dnd.SESSIONS / name / found[-1]["file"]).write_text(text, encoding="utf-8")
+    panel_log(app, user, f"edited the D&D campaign {name}'s memory file {found[-1]['file']}")
+    raise web.HTTPFound(f"/dnd/{name}")
+
+
+async def dnd_ask(request):
+    """Queue a question; the transcriber's review thread answers it and writes what it's doing as it goes."""
+    app, user, name = request.app, check_post(request), campaign_name(request)
+    question = (await request.post()).get("question", "").strip()
+    if not claude_on(app) or not 0 < len(question) <= 1000:
+        raise web.HTTPBadRequest(text="Ask needs Claude turned on and a question up to 1000 characters")
+    db.add_campaign_ask(app["db"], name, question, int(time.time()))
+    panel_log(app, user, f'asked Claude about the D&D campaign {name}: "{question[:200]}"')
+    raise web.HTTPFound(f"/dnd/{name}")
+
+
+async def dnd_ask_status(request):
+    if not session(request):
+        raise web.HTTPForbidden()
+    ask = db.get_campaign_ask(request.app["db"], int(request.match_info["id"]))
+    if not ask:
+        raise web.HTTPNotFound()
+    return web.json_response({"done": ask["answer"] is not None or bool(ask["error"]), "progress": ask["progress"] or ""})
 
 
 async def voice_clip(request):
@@ -1192,6 +1349,7 @@ ICONS = {
     "leveling": '<path d="M4 20v-6M10 20V9M16 20V4M2 20h20"/>',
     "games": '<rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/>',
     "voice": '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8"/>',
+    "dnd": '<path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M12 2v6M3 7l9 1 9-1M12 8l-6 9h12zM12 8l9 9M12 8l-9 9"/>',
     "translate": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z"/>',
     "setup": '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
     "logs": '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/>',
@@ -1208,6 +1366,7 @@ TABS = [
     ("leveling", "Leveling", "XP, levels and rewards", leveling_tab),
     ("games", "Games", "Fun stuff to play in the server", games_tab),
     ("voice", "Voice", "Transcripts and recordings of voice calls", voice_tab),
+    ("dnd", "D&amp;D", "Campaigns: their cast, setting and sessions, and questions about them", dnd_tab),
     ("translate", "Translate", "Automatic translation between languages", translate_tab),
     ("admin", "Admin (do not touch)", "", admin_tab),
 ]
@@ -1524,7 +1683,10 @@ def make_app():
                     web.get(r"/voice/clip/{id:\d+}.ogg", voice_clip), web.post(r"/voice/call/{id:\d+}/answer", voice_answer),
                     web.post(r"/voice/call/{id:\d+}/rerun", voice_rerun), web.post(r"/voice/call/{id:\d+}/ask", voice_ask),
                     web.post(r"/voice/call/{id:\d+}/dnd", voice_dnd),
-                    web.post("/voice/import", voice_import), web.post(r"/voice/call/{id:\d+}/audio", voice_audio_upload),
+                    web.post("/voice/import", voice_import), web.post("/dnd/new", dnd_new),
+                    web.get(f"/dnd/{{name:{NAME}}}", dnd_campaign), web.post(f"/dnd/{{name:{NAME}}}/settings", dnd_settings),
+                    web.post(f"/dnd/{{name:{NAME}}}/delete", dnd_delete), web.post(f"/dnd/{{name:{NAME}}}/memory", dnd_memory),
+                    web.post(f"/dnd/{{name:{NAME}}}/ask", dnd_ask), web.get(r"/dnd/ask/{id:\d+}.json", dnd_ask_status), web.post(r"/voice/call/{id:\d+}/audio", voice_audio_upload),
                     web.get(r"/voice/call/{id:\d+}/audio.ogg", voice_call_audio),
                     web.get("/logs/export", logs_export), web.get("/logs/file/{name}", log_file),
                     web.get(r"/rolemenu/{id:new|\d+}", rolemenu_get), web.post(r"/rolemenu/{id:new|\d+}", rolemenu_save),

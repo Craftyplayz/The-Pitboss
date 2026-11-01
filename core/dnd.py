@@ -121,7 +121,8 @@ possible spellings, most likely first.
 any other likely answers. The form always adds an "Other" box, so never add one. When a question is about something that \
 happened, give the time of the line exactly as the transcript writes it, like 1:08:14, so I can jump there and listen.
 In any text you write, put transcript times in square brackets, like [1:08:14]: the page turns them into links to that moment.
-My answers come back as the tool result. Ask follow-ups the same way, or go on to Phase 4 and 5 when nothing is left."""
+My answers come back as the tool result. Ask follow-ups the same way, or go on to Phase 4 and 5 when nothing is left.
+In the memory file's Players table, list the DM too, with "DM" as their character."""
 SYSTEM = PROMPT + ASKING
 
 TOOL = {"name": "save_session_file", "eager_input_streaming": True,
@@ -165,6 +166,102 @@ def questions_text(ask):
     out += ["", "Questions:"] + [f"  {i}. {q['question']} [{q['time']}] \"{q['quote']}\" Options: {' / '.join(q['options'])}"
                                  for i, q in enumerate(a.get("questions", []), 1)]
     return "\n".join(out)
+
+
+CAMPAIGN_SYSTEM = """You answer questions about a D&D campaign recorded on Discord. You get the campaign's memory file \
+(cumulative notes: cast, glossary, NPCs, places, plot threads, session log) and the summary of each session.
+- Answer from those first.
+- If they don't hold the answer, call read_session_transcript with the session most likely to have it. If that transcript \
+doesn't have it either, try the next most likely session, one at a time, until you find it or have read every session \
+with a transcript.
+- Transcripts come from speech-to-text, so names are often misheard: the memory file's glossary has the right spellings.
+- Cite where an answer comes from as "session 3", plus the transcript time in square brackets like [1:08:14] when you read it.
+- If nothing has the answer, say so plainly instead of guessing.
+Answer briefly in markdown. Never reveal topics the memory file's Preferences say to keep private."""
+READ = {"name": "read_session_transcript", "description": "The full transcript of one session, by its number.",
+        "input_schema": {"type": "object", "additionalProperties": False, "required": ["session"],
+                         "properties": {"session": {"type": "integer"}}}}
+CAMPAIGN_CACHE = {"type": "ephemeral"}  # questions often come a few at a time; 5 minutes is enough
+
+
+def frontmatter(md):
+    """{key: value} from a memory file's --- header."""
+    m = re.match(r"---\s*\n(.*?)\n---", md, re.S)
+    return dict(line.split(":", 1) for line in m[1].splitlines() if ":" in line) if m else {}
+
+
+def sections(md):
+    """{"Players": markdown, ...} from a memory file's ## headings."""
+    out, name = {}, None
+    for line in re.sub(r"^---\s*\n.*?\n---\s*\n", "", md, flags=re.S).splitlines():
+        if line.startswith("## "):
+            name = line[3:].strip()
+            out[name] = ""
+        elif name:
+            out[name] += line + "\n"
+    return {k: v.strip() for k, v in out.items()}
+
+
+def overview(summary):
+    """A session summary's overview: the part under its "overview" heading, else its first paragraph."""
+    body = re.sub(r"^\s*Written for:.*\n", "", summary or "")
+    m = re.search(r"^#+[^\n]*overview[^\n]*\n+(.*?)(?=\n#|\Z)", body, re.I | re.M | re.S)
+    return (m[1] if m else body.strip().split("\n\n")[0]).strip()
+
+
+def campaign_sessions(conn, campaign):
+    """[{number, file, title, date, summary, call_id}] oldest first, from the session files and the chats that saved them."""
+    runs = db.campaign_runs(conn, campaign)
+    out = []
+    for path in files(SESSIONS / campaign):
+        head, run = frontmatter(path.read_text(encoding="utf-8")), runs.get(path.name)
+        out.append({"number": int(FILE.fullmatch(path.name)[1]), "file": path.name, "title": head.get("title", "").strip(),
+                    "date": head.get("date", "").strip(), "summary": run["summary"] if run else None,
+                    "call_id": run["call_id"] if run else None})
+    return out
+
+
+def rename(conn, old, new):
+    if (SESSIONS / old).exists():
+        (SESSIONS / old).rename(SESSIONS / new)
+    db.rename_campaign(conn, old, new)
+
+
+def answer(conn, client, ask):
+    """Answer a question about a campaign: summaries first, then one session's transcript at a time."""
+    campaign, progress = ask["campaign"], lambda text: db.update_campaign_ask(conn, ask["id"], progress=text)
+    found = campaign_sessions(conn, campaign)
+    memory = (SESSIONS / campaign / found[-1]["file"]).read_text(encoding="utf-8") if found else "(no memory file yet)"
+    notes = "".join(f'<session number="{s["number"]}" date="{s["date"]}" title="{s["title"]}" '
+                    f'transcript="{"yes" if s["call_id"] else "none"}">\n{s["summary"] or "(no summary saved)"}\n</session>\n'
+                    for s in found)
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": f"<memory>\n{memory}\n</memory>\n\n{notes}", "cache_control": CAMPAIGN_CACHE},
+        {"type": "text", "text": f"<question>{ask['question']}</question>"}]}]
+    progress(f"Reading the memory file and {len(found)} session summar{'y' if len(found) == 1 else 'ies'}…")
+    by_number, read = {s["number"]: s for s in found}, []
+    while True:
+        with client.beta.messages.stream(model=MODEL, max_tokens=16000, system=CAMPAIGN_SYSTEM, messages=messages, tools=[READ],
+                                         tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+                                         output_config={"effort": "medium"}, betas=BETAS, fallbacks="default") as stream:
+            msg = stream.get_final_message()
+        if msg.stop_reason in ("refusal", "max_tokens"):
+            raise RuntimeError("Claude declined to answer" if msg.stop_reason == "refusal" else "Claude's answer was cut off")
+        content = [b.to_dict() for b in msg.content]
+        messages.append({"role": "assistant", "content": content})
+        use = next((b for b in content if b["type"] == "tool_use"), None)
+        if not use:
+            return db.update_campaign_ask(conn, ask["id"], answer=text_of(content), progress=None)
+        s = by_number.get(use["input"].get("session"))
+        call = db.get_call(conn, s["call_id"]) if s and s["call_id"] else None
+        if call:
+            where = "the summaries" if not read else f"session {read[-1]}"
+            title = f" ({s['title']})" if s["title"] else ""
+            progress(f"Not in {where}. Reading session {s['number']}'s transcript{title}…")
+            read.append(s["number"])
+        result = call_text(conn, call) if call else "No transcript for that session. Try another, or answer with what you have."
+        messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": use["id"], "content": result,
+                                                      "is_error": not call}]})
 
 
 def campaigns():

@@ -136,6 +136,55 @@ class Turns(unittest.TestCase):
         self.assertEqual(dnd.pending(json.loads(run["messages"]))["input"], ASKED)
         self.assertIn("N1. Valen (PC, high; heard as Velen): Valen / Velen", dnd.questions_text(ask))
 
+    def test_dnd_channel_skips_the_regular_review(self):
+        self.conn.execute("DELETE FROM dnd_runs")
+        for i in range(1, 25):  # long enough to review
+            db.add_clip(self.conn, self.call, 7, "Raygun (@ray)", i * 1000, 800, f"{i}.ogg")
+            db.save_transcript(self.conn, i + 1, text=f"line {i}")
+        db.update_call(self.conn, self.call, review_status=None)
+        db.set_setting(self.conn, "dnd_channels", '{"11": "curse"}')  # another channel: the regular review
+        client = fake_client(text('{"questions": []}'))
+        review.step(self.conn, client)
+        self.assertEqual(db.get_call(self.conn, self.call)["review_status"], "summarise")
+        self.assertIsNone(db.call_dnd(self.conn, self.call))
+
+        db.update_call(self.conn, self.call, review_status=None)
+        db.set_setting(self.conn, "dnd_channels", '{"10": "curse"}')
+        review.step(self.conn, fake_client())  # no request: it only queues the D&D chat
+        self.assertEqual(db.get_call(self.conn, self.call)["review_status"], "dnd")
+        self.assertEqual((self.run_()["campaign"], self.run_()["status"]), ("curse", "claude"))
+
+        db.rerun_review(self.conn, self.call)  # "Run the regular review too" on the call page
+        self.conn.execute("UPDATE dnd_runs SET status = 'you'")
+        client = fake_client(text('{"questions": []}'))
+        review.step(self.conn, client)
+        self.assertEqual(db.get_call(self.conn, self.call)["review_status"], "summarise")
+
+    def test_campaign_question_reads_transcripts_one_at_a_time(self):
+        (self.dir / "curse").mkdir()
+        (self.dir / "curse" / "session-01-2025-10-29.md").write_text("---\ntitle: The Raid\ndate: 2025-10-29\n---\n## Players\nRaygun",
+                                                                    encoding="utf-8")
+        run = self.run_()
+        db.update_dnd(self.conn, run["id"], status="done", filename="session-01-2025-10-29.md", summary="## Overview\nA raid.")
+        ask_id = db.add_campaign_ask(self.conn, "curse", "Who attacked?", 0)
+        seen = []
+        client = fake_client([{"type": "tool_use", "id": "r1", "name": "read_session_transcript", "input": {"session": 9}}],
+                             [{"type": "tool_use", "id": "r2", "name": "read_session_transcript", "input": {"session": 1}}],
+                             text("Raygun did [0:00] (session 1)."))
+        stream = client.beta.messages.stream
+        stream.side_effect = lambda **kw: seen.append(db.get_campaign_ask(self.conn, ask_id)["progress"]) or stream.return_value
+        review.step(self.conn, client)
+        ask = db.get_campaign_ask(self.conn, ask_id)
+        self.assertEqual((ask["answer"], ask["progress"]), ("Raygun did [0:00] (session 1).", None))
+        self.assertEqual(seen, ["Reading the memory file and 1 session summary…"] * 2
+                         + ["Not in the summaries. Reading session 1's transcript (The Raid)…"])
+        first = stream.call_args_list[0].kwargs["messages"][0]["content"][0]["text"]
+        self.assertIn("## Players\nRaygun", first)
+        self.assertIn('<session number="1" date="2025-10-29" title="The Raid" transcript="yes">\n## Overview\nA raid.', first)
+        last = stream.call_args_list[2].kwargs["messages"]
+        self.assertTrue(last[2]["content"][0]["is_error"])  # session 9 doesn't exist
+        self.assertIn("I attack the bandit.", last[4]["content"][0]["content"])
+
     def test_failure_keeps_the_chat(self):
         client = mock.MagicMock()
         client.beta.messages.stream.side_effect = RuntimeError("overloaded")

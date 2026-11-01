@@ -330,6 +330,53 @@ class ClaudeReview(VoiceCall):
         self.assertEqual((await up(0, data, True)).status, 400)  # only once
         self.assertEqual((await self.client.post(f"/voice/call/{self.call}/audio?offset=0&done=1", data=data, headers=self.ORIGIN)).status, 400)
 
+    async def test_dnd_tab(self):
+        sessions = Path(self.dir.name) / "sessions"
+        with mock.patch.object(dash.dnd, "SESSIONS", sessions):
+            async def post(path, data):
+                return await self.client.post(path, data=data, headers=self.ORIGIN, allow_redirects=False)
+            self.assertIn("No campaigns yet", await (await self.client.get("/dnd")).text())
+            self.assertEqual((await post("/dnd/new", {"name": "../x"})).status, 400)
+            await post("/dnd/new", {"name": " Curse "})
+            self.assertTrue((sessions / "curse").is_dir())
+            self.assertEqual((await post("/dnd/curse/settings", {"name": "curse", "channel": "11"})).status, 400)  # a text channel
+            await post("/dnd/curse/settings", {"name": "strahd", "channel": "10"})
+            self.assertEqual((dash.dnd.campaigns(), db.dnd_channels(self.db)), (["strahd"], {"10": "strahd"}))
+            self.assertIn('<option value="10" selected>🔊 Deadlock 1</option>', await (await self.client.get("/dnd")).text())
+
+            (sessions / "strahd" / "session-01-2026-10-22.md").write_text(
+                "---\nsession: 01\ndate: 2026-10-22\ntitle: The <Ratway>\n---\n## Players\n| Player | Character |\n|---|---|\n"
+                "| Sam | DM |\n## NPCs\nGarren Pike\n## Session log\n- stuff", encoding="utf-8")
+            db.start_dnd(self.db, self.call, "strahd")
+            db.update_dnd(self.db, 1, status="done", filename="session-01-2026-10-22.md",
+                          summary="Written for: the table\n## 1. Session overview\nThey found **Edrin**.\n## 2. Cast\nx")
+            page = await (await self.client.get("/dnd/strahd")).text()
+            self.assertIn("<td>Sam</td><td>DM</td>", page)  # DM and characters
+            self.assertIn("<h3>NPCs</h3>", page)
+            self.assertIn("Session 1: The &lt;Ratway&gt; <small>2026-10-22</small>", page)
+            self.assertIn("<p>They found <b>Edrin</b>.</p>", page)  # only the overview
+            self.assertNotIn("2. Cast", page)
+            self.assertIn(f'href="/voice/call/{self.call}"', page)
+
+            await post("/dnd/strahd/memory", {"text": "---\ntitle: Fixed\n---\n## Players\nonly Sam"})
+            self.assertIn("only Sam", (sessions / "strahd" / "session-01-2026-10-22.md").read_text(encoding="utf-8"))
+
+            await post("/dnd/strahd/ask", {"question": "Who is Edrin?"})
+            ask = db.campaign_asks(self.db, "strahd")[0]
+            self.assertIn('id="askstatus">Waiting for Claude…', await (await self.client.get("/dnd/strahd")).text())
+            db.update_campaign_ask(self.db, ask["id"], progress="Not in the summaries. Reading session 1's transcript…")
+            status = await (await self.client.get(f"/dnd/ask/{ask['id']}.json")).json()
+            self.assertEqual(status, {"done": False, "progress": "Not in the summaries. Reading session 1's transcript…"})
+            db.update_campaign_ask(self.db, ask["id"], answer="A shopkeeper (session 1).", progress=None)
+            self.assertTrue((await (await self.client.get(f"/dnd/ask/{ask['id']}.json")).json())["done"])
+
+            await post("/dnd/strahd/delete", {})
+            self.assertEqual((dash.dnd.campaigns(), db.dnd_channels(self.db), db.call_dnd(self.db, self.call)), ([], {}, None))
+            self.assertIsNotNone(db.get_call(self.db, self.call))  # the call stays
+        logs = [r["summary"] for r in self.db.execute("SELECT summary FROM events WHERE kind = 'panel_change'")]
+        self.assertIn("Crafty renamed the D&D campaign curse to strahd", logs)
+        self.assertIn("Crafty set the D&D campaign strahd's channel: 🔊Deadlock 1", logs)
+
     async def test_glossary_setting(self):
         await self.client.post("/voice/settings", data={"model": "small.en", "glossary": " Veyra (heard as Vera) "}, headers=self.ORIGIN)
         self.assertEqual(db.get_setting(self.db, "voice_glossary"), "Veyra (heard as Vera)")

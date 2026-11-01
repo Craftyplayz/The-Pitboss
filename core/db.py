@@ -126,6 +126,15 @@ CREATE TABLE IF NOT EXISTS voice_asks (
     answer   TEXT,                -- NULL while Claude thinks
     error    TEXT
 );
+CREATE TABLE IF NOT EXISTS dnd_asks (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign TEXT NOT NULL,
+    question TEXT NOT NULL,
+    asked_at INTEGER NOT NULL,
+    progress TEXT,                -- what Claude is doing right now, for the campaign page
+    answer   TEXT,                -- NULL while Claude works
+    error    TEXT
+);
 CREATE TABLE IF NOT EXISTS dnd_runs (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     call_id  INTEGER NOT NULL,
@@ -546,6 +555,57 @@ def update_dnd(conn, run_id, **fields):
     cols = ", ".join(f"{k} = ?" for k in fields)
     with conn:
         conn.execute(f"UPDATE dnd_runs SET {cols} WHERE id = ?", (*fields.values(), run_id))
+
+
+def dnd_channels(conn):
+    """{voice channel id: campaign}: calls there get the D&D summary instead of the regular review."""
+    return json.loads(get_setting(conn, "dnd_channels") or "{}")
+
+
+def campaign_runs(conn, campaign):
+    """The campaign's finished D&D summaries, by the session file each one saved."""
+    return {r["filename"]: r for r in conn.execute("SELECT * FROM dnd_runs WHERE campaign = ? AND status = 'done' ORDER BY id",
+                                                  (campaign,))}
+
+
+def rename_campaign(conn, old, new):
+    with conn:
+        conn.execute("UPDATE dnd_runs SET campaign = ? WHERE campaign = ?", (new, old))
+        conn.execute("UPDATE dnd_asks SET campaign = ? WHERE campaign = ?", (new, old))
+    set_setting(conn, "dnd_channels", json.dumps({k: new if v == old else v for k, v in dnd_channels(conn).items()}))
+
+
+def delete_campaign(conn, campaign):
+    """Its chats and questions go; the calls and their transcripts stay."""
+    with conn:
+        conn.execute("DELETE FROM dnd_runs WHERE campaign = ?", (campaign,))
+        conn.execute("DELETE FROM dnd_asks WHERE campaign = ?", (campaign,))
+    set_setting(conn, "dnd_channels", json.dumps({k: v for k, v in dnd_channels(conn).items() if v != campaign}))
+
+
+def add_campaign_ask(conn, campaign, question, at):
+    with conn:
+        return conn.execute("INSERT INTO dnd_asks (campaign, question, asked_at, progress) VALUES (?, ?, ?, 'Waiting for Claude…')",
+                            (campaign, question, at)).lastrowid
+
+
+def next_campaign_ask(conn):
+    return conn.execute("SELECT * FROM dnd_asks WHERE answer IS NULL AND error IS NULL ORDER BY id LIMIT 1").fetchone()
+
+
+def get_campaign_ask(conn, ask_id):
+    return conn.execute("SELECT * FROM dnd_asks WHERE id = ?", (ask_id,)).fetchone()
+
+
+def update_campaign_ask(conn, ask_id, **fields):
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    with conn:
+        conn.execute(f"UPDATE dnd_asks SET {cols} WHERE id = ?", (*fields.values(), ask_id))
+
+
+def campaign_asks(conn, campaign, limit=20):
+    """Newest first."""
+    return conn.execute("SELECT * FROM dnd_asks WHERE campaign = ? ORDER BY id DESC LIMIT ?", (campaign, limit)).fetchall()
 
 
 def summarised_calls(conn, ids=None):
