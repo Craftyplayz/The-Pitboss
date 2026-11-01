@@ -25,7 +25,7 @@ from aiohttp import web
 from cogs.welcome import load as load_welcome
 from core import rolemenus
 from core.embeds import GOLD, LIMITS, clean as clean_embed, render as render_embed
-from core import db, review
+from core import db, dnd, markdown, review
 from core.events import CATEGORIES, default_categories
 from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR, clock, short_name
 
@@ -668,6 +668,50 @@ def ask_card(app, call, asks):
     return f'<div class="card" id="ask"><h2>Ask about this call</h2>{form}{shown}</div>'
 
 
+def dnd_card(call, run):
+    """Claude's D&D session summary: a chat with its questions, then the summary and the saved memory file."""
+    e, cid = html.escape, call["id"]
+
+    def button(action, label, cls="btn ghost"):
+        return (f'<form method="post" action="/voice/call/{cid}/dnd" style="display:inline"><input type="hidden" name="action" '
+                f'value="{action}"><button class="{cls}" type="submit">{label}</button></form>')
+    if not run:
+        options = "".join(f'<option value="{e(c)}">{e(c)}</option>' for c in dnd.campaigns())
+        body = (f'<form method="post" action="/voice/call/{cid}/dnd" class="row"><input type="hidden" name="action" value="start">'
+                + (f'<select name="campaign" aria-label="Campaign">{options}</select>' if options else "")
+                + '<input name="new" maxlength="40" pattern="[a-z0-9][a-z0-9\-]*" placeholder="or a new campaign name" '
+                  'aria-label="New campaign name"><button class="btn" type="submit">Summarise with Claude</button></form>'
+                  '<p><small>Claude reads the whole transcript and the campaign\'s newest file in data/sessions/, asks you questions '
+                  'here, then writes a summary and saves the next session file. A typed name starts a new campaign.</small></p>')
+        return f'<div class="card" id="dnd"><h2>D&amp;D session summary</h2>{body}</div>'
+    body = f'<p><small>Campaign <b>{e(run["campaign"])}</b> · memory: {e(run["memory"] or "none (first session)")}'
+    body += f' · sent {e(run["sent"])}</small></p>' if run["sent"] else "</small></p>"
+    for m in json.loads(run["messages"])[1:]:  # the first is the transcript itself
+        if isinstance(m["content"], str):
+            body += f'<div class="ask"><p class="aq">You</p><p>{e(m["content"]).replace(chr(10), "<br>")}</p></div>'
+        elif m["role"] == "assistant" and (text := dnd.text_of(m["content"])):
+            body += f'<div class="ask md"><p class="aq">Claude</p>{markdown.render(text)}</div>'
+    status = run["status"]
+    if status == "claude":
+        body += "<p><i class=wait>Claude is reading and thinking… this can take a few minutes.</i></p>"
+    elif status == "you":
+        body += (f'<form method="post" action="/voice/call/{cid}/dnd" class="keep"><input type="hidden" name="action" value="reply">'
+                 '<textarea name="text" maxlength="20000" required aria-label="Your answers" '
+                 'placeholder="1: yes&#10;2: it\'s Veyra, not Vera&#10;or: done with questions"></textarea>'
+                 '<button class="btn" type="submit">Send</button></form>')
+    elif status == "failed":
+        body += f'<p class="bad">Failed: {e(run["error"] or "")}</p>' + button("retry", "Retry", "btn")
+    else:
+        body += (f'<h3>Summary</h3><div class="md">{markdown.render(run["summary"] or "")}</div>'
+                 f'<textarea id="dndmd" hidden>{e(run["summary"] or "")}</textarea>'
+                 '<button class="btn" type="button" onclick="navigator.clipboard.writeText(document.getElementById(\'dndmd\').value)'
+                 '.then(()=>this.textContent=\'Copied\')">Copy summary</button>'
+                 f'<p><small>Saved data/sessions/{e(run["campaign"])}/{e(run["filename"])}</small></p>')
+    if status != "claude":
+        body += " " + button("restart", "Start over")
+    return f'<div class="card" id="dnd"><h2>D&amp;D session summary</h2>{body}</div>'
+
+
 def timeline(call, clips, joins, faces, colours, fixes=()):
     """Messages grouped by speaker, like a chat, with join and leave markers between them."""
     e = html.escape
@@ -708,8 +752,9 @@ async def voice_call(request):
     faces = await avatars(app, list(colours))
     length_ms = ((call["ended_at"] or int(time.time())) - call["started_at"]) * 1000
     questions, asks, on = db.call_questions(app["db"], call["id"]), db.call_asks(app["db"], call["id"]), claude_on(app)
-    fixes = review.fixes(questions)
-    claude_working = on and (call["review_status"] in (None, "summarise") or any(a["answer"] is None and not a["error"] for a in asks))
+    fixes, run = review.fixes(questions), db.call_dnd(app["db"], call["id"])
+    claude_working = on and (call["review_status"] in (None, "summarise") or any(a["answer"] is None and not a["error"] for a in asks)
+                             or bool(run and run["status"] == "claude"))
     live = call["status"] == "recording" or any(c["text"] is None and not c["error"] for c in clips) or claude_working
     # the player schedules every clip at its place in the call, so people talking over each other play together
     player_clips = json.dumps([[c["id"], c["start_ms"], c["duration_ms"]] for c in clips if c["text"] != ""])
@@ -725,6 +770,7 @@ async def voice_call(request):
             f'Download transcript</a> {delete}</span></div>'
             + (summary_card(call) if call["summary"] else "") + review_card(app, call, questions, clips)
             + (ask_card(app, call, asks) if call["summary"] and on else "")
+            + (dnd_card(call, run) if on and db.call_ready(app["db"], call["id"], review.final_model(app["db"])) else "")
             + ('<label class="check"><input type="checkbox" id="orig"> Show original text (before corrections)</label>' if fixes else "")
             + f'<input id="find" type="search" placeholder="Search the transcript">'
             f'<div id="tls">{timeline(call, clips, db.call_joins(app["db"], call), faces, colours, fixes) or "<p class=empty>Nothing said yet.</p>"}</div>'
@@ -814,6 +860,32 @@ async def voice_ask(request):
     with_others = f" (with {len(include)} other call summaries)" if include else ""
     panel_log(app, user, f'asked Claude about voice call {call["id"]}: "{question[:200]}"{with_others}')
     raise web.HTTPFound(f"/voice/call/{call['id']}#ask")
+
+
+async def voice_dnd(request):
+    """Start, answer, retry or restart the D&D summary chat; the transcriber's review thread does Claude's turns."""
+    app, user, call = posted_call(request)
+    posted, run = await request.post(), db.call_dnd(app["db"], call["id"])
+    action = posted.get("action")
+    if not claude_on(app) or not db.call_ready(app["db"], call["id"], review.final_model(app["db"])):
+        raise web.HTTPBadRequest(text="Needs Claude turned on and a finished call")
+    if (action == "start" and not run) or (action == "restart" and run and run["status"] != "claude"):
+        campaign = run["campaign"] if action == "restart" else posted.get("new", "").strip().lower() or posted.get("campaign", "")
+        if not dnd.CAMPAIGN.fullmatch(campaign):
+            raise web.HTTPBadRequest(text="Campaign names: lowercase letters, digits and dashes, up to 40")
+        db.start_dnd(app["db"], call["id"], campaign)
+        what = f"started a D&D summary ({campaign})"
+    elif action == "reply" and run and run["status"] == "you" and 0 < len(text := posted.get("text", "").strip()) <= 20000:
+        db.update_dnd(app["db"], run["id"], status="claude",
+                      messages=json.dumps(json.loads(run["messages"]) + [{"role": "user", "content": text}]))
+        what = "answered Claude's D&D summary questions"
+    elif action == "retry" and run and run["status"] == "failed":
+        db.update_dnd(app["db"], run["id"], status="claude", error=None)
+        what = "retried a D&D summary"
+    else:
+        raise web.HTTPBadRequest(text="Can't do that now")
+    panel_log(app, user, f"{what} on voice call {call['id']}")
+    raise web.HTTPFound(f"/voice/call/{call['id']}#dnd")
 
 
 async def voice_clip(request):
@@ -1122,6 +1194,8 @@ main.wide{max-width:none}
 .q{border:0;border-bottom:1px solid var(--line);padding:10px 0;margin:0}.q p{margin:0 0 4px}.q label.check{margin:6px 0}
 .q input[name^=own]{width:auto;flex:1;padding:5px 8px}.ask{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
 .aq{font-weight:600;margin-bottom:4px}.ask .wait{color:var(--mu)}
+.md h2,.md h3,.md h4{margin:12px 0 4px}.md table{border-collapse:collapse;margin:6px 0}.md th,.md td{border:1px solid var(--line);padding:4px 8px;text-align:left}
+.tw{overflow-x:auto}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row input,.row select{width:auto;flex:1}
 .jl{font-size:12px;font-style:italic;color:var(--mu);padding:8px 0 8px 54px;border-bottom:1px solid var(--line)}
 #player{position:sticky;bottom:12px;margin-top:16px;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
 border-radius:var(--r);padding:10px 16px;box-shadow:0 8px 28px rgba(0,0,0,.45)}#player #bar{flex:1;width:auto;min-width:60px;accent-color:var(--gold)}
@@ -1305,6 +1379,7 @@ def make_app():
                     web.get(r"/voice/call/{id:\d+}.txt", voice_call_txt), web.post(r"/voice/call/{id:\d+}/delete", voice_call_delete),
                     web.get(r"/voice/clip/{id:\d+}.ogg", voice_clip), web.post(r"/voice/call/{id:\d+}/answer", voice_answer),
                     web.post(r"/voice/call/{id:\d+}/rerun", voice_rerun), web.post(r"/voice/call/{id:\d+}/ask", voice_ask),
+                    web.post(r"/voice/call/{id:\d+}/dnd", voice_dnd),
                     web.get("/logs/export", logs_export), web.get("/logs/file/{name}", log_file),
                     web.get(r"/rolemenu/{id:new|\d+}", rolemenu_get), web.post(r"/rolemenu/{id:new|\d+}", rolemenu_save),
                     web.post(r"/rolemenu/{id:\d+}/delete", rolemenu_delete),

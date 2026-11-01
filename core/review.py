@@ -197,6 +197,14 @@ def step(conn, client):
             db.save_ask(conn, ask["id"], error=str(e)[:500])
             print(f"review: question {ask['id']} failed: {e!r}")
         return True
+    if run := db.next_dnd(conn):
+        from core import dnd  # here: core.dnd imports this module
+        try:
+            dnd.turn(conn, client, run)
+        except Exception as e:  # the chat stays as it was; the call page's Retry sends the same turn again
+            db.update_dnd(conn, run["id"], status="failed", error=str(e)[:500])
+            print(f"review: D&D summary {run['id']} failed: {e!r}")
+        return True
     call = db.call_to_summarise(conn)
     work = summarise
     if not call:

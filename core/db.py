@@ -125,6 +125,18 @@ CREATE TABLE IF NOT EXISTS voice_asks (
     answer   TEXT,                -- NULL while Claude thinks
     error    TEXT
 );
+CREATE TABLE IF NOT EXISTS dnd_runs (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id  INTEGER NOT NULL,
+    campaign TEXT NOT NULL,       -- folder in data/sessions/
+    status   TEXT NOT NULL,       -- claude (its turn), you (waiting for a reply), done (file saved) or failed
+    messages TEXT NOT NULL,       -- JSON chat history sent to Claude, starting with the transcript
+    sent     TEXT,                -- what the first message held: characters, parts, last timestamp
+    memory   TEXT,                -- the session file it started from, NULL on the first session
+    filename TEXT,                -- the session file it saves
+    summary  TEXT,
+    error    TEXT
+);
 """
 
 
@@ -412,6 +424,7 @@ def delete_call(conn, call_id):
     with conn:
         conn.execute("DELETE FROM voice_questions WHERE call_id = ?", (call_id,))
         conn.execute("DELETE FROM voice_asks WHERE call_id = ?", (call_id,))
+        conn.execute("DELETE FROM dnd_runs WHERE call_id = ?", (call_id,))
         conn.execute("DELETE FROM voice_clips WHERE call_id = ?", (call_id,))
         conn.execute("DELETE FROM voice_calls WHERE id = ?", (call_id,))
 
@@ -499,6 +512,26 @@ def save_ask(conn, ask_id, answer=None, error=None):
 def call_asks(conn, call_id):
     """Newest first, like the call page shows them."""
     return conn.execute("SELECT * FROM voice_asks WHERE call_id = ? ORDER BY id DESC", (call_id,)).fetchall()
+
+
+def start_dnd(conn, call_id, campaign):
+    with conn:
+        conn.execute("INSERT INTO dnd_runs (call_id, campaign, status, messages) VALUES (?, ?, 'claude', '[]')", (call_id, campaign))
+
+
+def call_dnd(conn, call_id):
+    """The call's newest D&D summary chat, or None."""
+    return conn.execute("SELECT * FROM dnd_runs WHERE call_id = ? ORDER BY id DESC LIMIT 1", (call_id,)).fetchone()
+
+
+def next_dnd(conn):
+    return conn.execute("SELECT * FROM dnd_runs WHERE status = 'claude' ORDER BY id LIMIT 1").fetchone()
+
+
+def update_dnd(conn, run_id, **fields):
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    with conn:
+        conn.execute(f"UPDATE dnd_runs SET {cols} WHERE id = ?", (*fields.values(), run_id))
 
 
 def summarised_calls(conn, ids=None):

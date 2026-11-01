@@ -225,6 +225,35 @@ class ClaudeReview(VoiceCall):
         logs = [r["summary"] for r in self.db.execute("SELECT summary FROM events WHERE kind = 'panel_change'")]
         self.assertIn("Crafty re-ran Claude's summary of voice call 1 (🔊Deadlock 1)", logs)
 
+    async def test_dnd_summary(self):
+        self.assertNotIn("Summarise with Claude", await self.page())  # waits for the final transcript
+        db.save_transcript(self.db, 4, text="bye")
+        with mock.patch.object(dash.dnd, "SESSIONS", Path(self.dir.name) / "sessions"):
+            self.assertIn("Summarise with Claude", await self.page())
+            self.assertEqual((await self.post("dnd", {"action": "start", "new": "../x"})).status, 400)
+            await self.post("dnd", {"action": "start", "new": "Curse "})
+            run = db.call_dnd(self.db, self.call)
+            self.assertEqual((run["campaign"], run["status"]), ("curse", "claude"))
+            self.assertIn("Claude is reading", await self.page())
+            self.assertEqual((await self.post("dnd", {"action": "reply", "text": "hi"})).status, 400)  # not your turn
+            msgs = [{"role": "user", "content": []}, {"role": "assistant", "content": [{"type": "text", "text": "1. Is **Vera** Veyra?"}]}]
+            db.update_dnd(self.db, run["id"], status="you", messages=json.dumps(msgs), sent="35 characters in 1 part, last timestamp 0:03")
+            page = await self.page()
+            self.assertIn("<ol><li>Is <b>Vera</b> Veyra?</li></ol>", page)
+            self.assertIn("sent 35 characters in 1 part, last timestamp 0:03", page)
+            await self.post("dnd", {"action": "reply", "text": " 1: yes "})
+            run = db.call_dnd(self.db, self.call)
+            self.assertEqual((run["status"], json.loads(run["messages"])[-1]), ("claude", {"role": "user", "content": "1: yes"}))
+            db.update_dnd(self.db, run["id"], status="done", summary="Written for: <the table>", filename="session-01-1970-01-01.md")
+            page = await self.page()
+            self.assertIn("<p>Written for: &lt;the table&gt;</p>", page)
+            self.assertIn("Copy summary", page)
+            self.assertIn("Saved data/sessions/curse/session-01-1970-01-01.md", page)
+            await self.post("dnd", {"action": "restart"})
+            self.assertEqual(db.call_dnd(self.db, self.call)["status"], "claude")
+        logs = [r["summary"] for r in self.db.execute("SELECT summary FROM events WHERE kind = 'panel_change'")]
+        self.assertIn("Crafty started a D&D summary (curse) on voice call 1", logs)
+
     async def test_glossary_setting(self):
         await self.client.post("/voice/settings", data={"model": "small.en", "glossary": " Veyra (heard as Vera) "}, headers=self.ORIGIN)
         self.assertEqual(db.get_setting(self.db, "voice_glossary"), "Veyra (heard as Vera)")
