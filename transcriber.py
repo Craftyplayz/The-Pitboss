@@ -1,7 +1,8 @@
 """Transcriber: turns each recorded voice clip into text as soon as it's saved. Its own process so the CPU work never freezes the bot.
 
-It uses the best model while it keeps up, switches to the fast one when clips start waiting, and once nothing is
-waiting it redoes finished calls' fast-model clips with the best model. A clip the best model wrote is never redone."""
+It uses the best model while it keeps up and steps down one model at a time (to the lowest one picked) when clips start
+waiting, and back up when it's quiet. Once nothing is waiting it redoes finished calls' clips that a lower model wrote,
+with the best model. A clip the best model wrote is never redone."""
 import os
 import time
 
@@ -16,40 +17,48 @@ from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR
 MODEL_DIR = VOICE_DIR.parent / "whisper"
 # half the CPU threads: the bot, website and control panel share the machine
 THREADS = max(1, (os.cpu_count() or 2) // 2)
-BEHIND_S = 15  # a clip waiting this long switches to the fast model
-CALM_S = 60  # the queue must stay empty this long before going back, so it doesn't flip back and forth
+BEHIND_S = 15  # a clip waiting this long steps down a model; still behind 15 s later, another step
+CALM_S = 60  # the queue must stay empty this long for each step back up, so it doesn't flip back and forth
 
 
 def pick_model(setting):
     return setting if setting in MODELS else DEFAULT_MODEL
 
 
-def pick_fast(setting, best):
-    """The fast model; the best one when it's set to never switch ("")."""
-    if setting is None:
-        return DEFAULT_MODEL
-    return setting if setting in MODELS else best
+def ladder(best, lowest_setting):
+    """Models to step through, best first: every model from the best down to the lowest picked.
+    Unset means down to small.en; "" means never switch."""
+    lowest = DEFAULT_MODEL if lowest_setting is None else lowest_setting
+    if lowest not in MODELS or MODELS.index(lowest) >= MODELS.index(best):
+        return [best]
+    return list(reversed(MODELS[MODELS.index(lowest):MODELS.index(best) + 1]))
 
 
 class Pace:
-    """Whether to use the fast model right now."""
+    """How many steps down the ladder to be right now; 0 is the best model."""
 
     def __init__(self):
-        self.fast = False
+        self.level = 0
+        self.changed = None
         self.empty_since = None
 
-    def update(self, oldest_wait, now):
-        """`oldest_wait`: seconds the oldest waiting clip has waited, None when nothing waits. `now`: a monotonic clock."""
+    def update(self, oldest_wait, now, steps):
+        """`oldest_wait`: seconds the oldest waiting clip has waited, None when nothing waits. `now`: a monotonic clock.
+        `steps`: how many models the ladder has."""
         if oldest_wait is None:
             if self.empty_since is None:
                 self.empty_since = now
-            if now - self.empty_since >= CALM_S:
-                self.fast = False
+            if self.level and now - self.empty_since >= CALM_S:
+                self.level -= 1
+                self.empty_since = now  # the next step up needs another quiet minute
         else:
             self.empty_since = None
-            if oldest_wait >= BEHIND_S:
-                self.fast = True
-        return self.fast
+            settled = self.changed is None or now - self.changed >= BEHIND_S  # give the new model a chance first
+            if oldest_wait >= BEHIND_S and settled and self.level < steps - 1:
+                self.level += 1
+                self.changed = now
+        self.level = min(self.level, steps - 1)  # the ladder got shorter in settings
+        return self.level
 
 
 def load(path):
@@ -82,16 +91,16 @@ def do_clip(conn, model, name, clip, upgrade=False):
           f"in {took:.1f}s ({clip['duration_ms'] / 1000 / max(took, 0.01):.1f}x real time)")
 
 
-def step(conn, models, pace, best, fast):
+def step(conn, models, pace, steps):
     """Transcribe one clip: the oldest waiting one, else a finished call's clip to upgrade. Returns False when idle.
-    `models(name)` gives a loaded model."""
+    `models(name)` gives a loaded model; `steps` is the ladder, best model first."""
     waiting = db.untranscribed_clips(conn, limit=1)
     wait = time.time() - waiting[0]["ready_at"] if waiting else None
-    name = fast if pace.update(wait, time.monotonic()) else best
+    name, best = steps[pace.update(wait, time.monotonic(), len(steps))], steps[0]
     if waiting:
         do_clip(conn, models(name), name, waiting[0])
         return True
-    if not pace.fast and (clip := db.clip_to_upgrade(conn, best)):
+    if pace.level == 0 and (clip := db.clip_to_upgrade(conn, best)):
         do_clip(conn, models(best), best, clip, upgrade=True)
         return True
     return False
@@ -109,11 +118,10 @@ def main():
 
     while True:
         # both read every step, so a change in The Pitstop's Voice settings applies to the next clip
-        best = pick_model(db.get_setting(conn, "voice_model"))
-        fast = pick_fast(db.get_setting(conn, "voice_fast_model"), best)
-        for name in [n for n in loaded if n not in (best, fast)]:
+        steps = ladder(pick_model(db.get_setting(conn, "voice_model")), db.get_setting(conn, "voice_fast_model"))
+        for name in [n for n in loaded if n not in steps]:
             del loaded[name]  # a model nobody picked any more
-        if not step(conn, models, pace, best, fast):
+        if not step(conn, models, pace, steps):
             time.sleep(1)
 
 

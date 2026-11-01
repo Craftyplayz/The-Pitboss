@@ -8,7 +8,8 @@ import av
 
 # next to the database, on the volume the bot, transcriber and control panel share
 VOICE_DIR = Path(os.environ.get("DB_PATH", "data/pitboss.db")).parent / "voice"
-# speech-to-text models picked in The Pitstop's Voice settings; only these, since a model name is a download
+# speech-to-text models picked in The Pitstop's Voice settings, least to most accurate (and fastest to slowest);
+# only these, since a model name is a download
 MODELS = ("base.en", "small.en", "medium.en", "large-v3-turbo")
 DEFAULT_MODEL = "small.en"
 RATE = 48000

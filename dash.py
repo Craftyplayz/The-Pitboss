@@ -451,15 +451,15 @@ def voice_settings_card(app, channels):
             f'<label for="live">Live transcript for calls it joins by itself</label><select id="live" name="live">{live_options}</select>'
             '<p><small>Everyone who can see that channel can read the live transcript. With /record start it posts where the command was run.</small></p>'
             f'<label for="model">Best speech-to-text model</label><select id="model" name="model">{options}</select>'
-            f'<label for="fast">Fast model when it falls behind</label><select id="fast" name="fast">{fast_options}</select>'
-            '<p><small>It transcribes with the best model while it keeps up. Once a sentence has waited 15 seconds it switches '
-            'to the fast model, and switches back after a quiet minute. When nothing is waiting, it redoes finished calls\' '
-            'fast-model lines with the best model; lines the best model wrote are never redone. small.en keeps up with busy '
-            'calls on a 6-core CPU; large-v3-turbo is the most accurate.</small></p><button class="btn" type="submit">Save</button></form>')
+            f'<label for="fast">Lowest model when it falls behind</label><select id="fast" name="fast">{fast_options}</select>'
+            '<p><small>It transcribes with the best model while it keeps up. Once a sentence has waited 15 seconds it steps down '
+            'one model (large-v3-turbo, then medium.en, then small.en) as far as the lowest one picked, and steps back up after '
+            'each quiet minute. When nothing is waiting, it redoes finished calls\' lower-model lines with the best model; lines '
+            'the best model wrote are never redone.</small></p><button class="btn" type="submit">Save</button></form>')
 
 
 def fast_model(app):
-    """The fast model setting: a model name, or "" for never switch. Unset means small.en, like the transcriber."""
+    """The lowest model setting: a model name, or "" for never switch. Unset means small.en, like the transcriber."""
     fast = db.get_setting(app["db"], "voice_fast_model")
     return DEFAULT_MODEL if fast is None else fast
 
@@ -500,7 +500,7 @@ async def voice_settings(request):
         raise web.HTTPBadRequest(text="Unknown model or channel")
     if fast != fast_model(app):
         db.set_setting(app["db"], "voice_fast_model", fast)
-        panel_log(app, user, f"set the fast speech-to-text model: {fast or 'never switch'}")
+        panel_log(app, user, f"set the lowest speech-to-text model: {fast or 'never switch'}")
     if live != (db.get_setting(app["db"], "voice_live_channel") or ""):
         db.set_setting(app["db"], "voice_live_channel", live)
         panel_log(app, user, "set the live transcript channel: " + (f"#{texts[live]}" if live else "the voice channel's own chat"))
