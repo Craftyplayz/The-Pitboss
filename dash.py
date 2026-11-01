@@ -438,6 +438,9 @@ def voice_settings_card(app, channels):
                     for c in channels if c["type"] in VOICE)
     model = db.get_setting(app["db"], "voice_model") or DEFAULT_MODEL
     options = "".join(f'<option{" selected" if m == model else ""}>{m}</option>' for m in MODELS)
+    fast = fast_model(app)
+    fast_options = f'<option value=""{" selected" if not fast else ""}>Never switch</option>' + "".join(
+        f'<option{" selected" if m == fast else ""}>{m}</option>' for m in MODELS)
     live = db.get_setting(app["db"], "voice_live_channel") or ""
     live_options = "<option value=\"\">The voice channel's own chat</option>" + "".join(
         f'<option value="{c["id"]}"{" selected" if c["id"] == live else ""}>#{html.escape(c["name"])}</option>'
@@ -447,9 +450,18 @@ def voice_settings_card(app, channels):
             '<p><small>Admins can also record any channel with /record start in Discord. The bot records one channel at a time.</small></p>'
             f'<label for="live">Live transcript for calls it joins by itself</label><select id="live" name="live">{live_options}</select>'
             '<p><small>Everyone who can see that channel can read the live transcript. With /record start it posts where the command was run.</small></p>'
-            f'<label for="model">Speech-to-text model</label><select id="model" name="model">{options}</select>'
-            '<p><small>small.en keeps up with live calls on a 6-core CPU. medium.en is more accurate but about 3 times slower. '
-            'A change applies to clips recorded after it.</small></p><button class="btn" type="submit">Save</button></form>')
+            f'<label for="model">Best speech-to-text model</label><select id="model" name="model">{options}</select>'
+            f'<label for="fast">Fast model when it falls behind</label><select id="fast" name="fast">{fast_options}</select>'
+            '<p><small>It transcribes with the best model while it keeps up. Once a sentence has waited 15 seconds it switches '
+            'to the fast model, and switches back after a quiet minute. When nothing is waiting, it redoes finished calls\' '
+            'fast-model lines with the best model; lines the best model wrote are never redone. small.en keeps up with busy '
+            'calls on a 6-core CPU; large-v3-turbo is the most accurate.</small></p><button class="btn" type="submit">Save</button></form>')
+
+
+def fast_model(app):
+    """The fast model setting: a model name, or "" for never switch. Unset means small.en, like the transcriber."""
+    fast = db.get_setting(app["db"], "voice_fast_model")
+    return DEFAULT_MODEL if fast is None else fast
 
 
 def call_status(c):
@@ -482,10 +494,13 @@ async def voice_settings(request):
     names = {c["id"]: c["name"] for c in channels if c["type"] in VOICE}
     texts = {c["id"]: c["name"] for c in channels if c["type"] in TEXT}
     picked = sorted(int(v) for v in posted.getall("autojoin", []) if v in names)
-    model = posted.get("model")
+    model, fast = posted.get("model"), posted.get("fast", fast_model(app))
     live = posted.get("live", "")
-    if model not in MODELS or (live and live not in texts):
+    if model not in MODELS or (fast and fast not in MODELS) or (live and live not in texts):
         raise web.HTTPBadRequest(text="Unknown model or channel")
+    if fast != fast_model(app):
+        db.set_setting(app["db"], "voice_fast_model", fast)
+        panel_log(app, user, f"set the fast speech-to-text model: {fast or 'never switch'}")
     if live != (db.get_setting(app["db"], "voice_live_channel") or ""):
         db.set_setting(app["db"], "voice_live_channel", live)
         panel_log(app, user, "set the live transcript channel: " + (f"#{texts[live]}" if live else "the voice channel's own chat"))
@@ -494,7 +509,7 @@ async def voice_settings(request):
         panel_log(app, user, "set voice auto-join channels: " + (", ".join(f"🔊{names[str(c)]}" for c in picked) or "none"))
     if model != (db.get_setting(app["db"], "voice_model") or DEFAULT_MODEL):
         db.set_setting(app["db"], "voice_model", model)
-        panel_log(app, user, f"set the speech-to-text model: {model}")
+        panel_log(app, user, f"set the best speech-to-text model: {model}")
     raise web.HTTPFound("/voice?saved")
 
 
@@ -529,6 +544,11 @@ def clip_text(clip):
     return "<i class=wait>Transcribing…</i>"
 
 
+def transcript_line(c):
+    written_by = f' title="{html.escape(c["model"])}"' if c["model"] else ""  # hover to see which model wrote it
+    return f'<p class="ln" data-s="{c["start_ms"]}" data-e="{c["start_ms"] + c["duration_ms"]}"{written_by}>{clip_text(c)}</p>'
+
+
 def timeline(call, clips, joins, faces, colours):
     """Messages grouped by speaker, like a chat, with join and leave markers between them."""
     e = html.escape
@@ -547,7 +567,7 @@ def timeline(call, clips, joins, faces, colours):
             out.append(f'<div class="jl">{e(short_name(name or "Someone"))} {"joined" if joined else "left"} · <time data-tt="{at}"></time></div>')
             continue
         first, run = g
-        lines = "".join(f'<p class="ln" data-s="{c["start_ms"]}" data-e="{c["start_ms"] + c["duration_ms"]}">{clip_text(c)}</p>' for c in run)
+        lines = "".join(transcript_line(c) for c in run)
         out.append(f'<div class="msg"><img class="av" src="{e(faces[first["member_id"]])}" alt=""><div>'
                    f'<div class="mh"><b style="color:{colours[first["member_id"]]}">{e(short_name(first["member_name"]))}</b>'
                    f'<button type="button" class="tt" data-seek="{first["start_ms"]}">{clock(first["start_ms"])}</button></div>{lines}</div></div>')

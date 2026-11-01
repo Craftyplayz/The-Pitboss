@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS voice_clips (
     duration_ms INTEGER NOT NULL,
     file        TEXT NOT NULL,     -- relative to the voice folder
     text        TEXT,              -- NULL until transcribed
-    error       TEXT
+    error       TEXT,
+    model       TEXT               -- speech-to-text model that wrote `text`; NULL before this was tracked
 );
 CREATE INDEX IF NOT EXISTS voice_clips_call ON voice_clips (call_id, start_ms);
 """
@@ -108,6 +109,10 @@ def connect(path):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    try:
+        conn.execute("ALTER TABLE voice_clips ADD COLUMN model TEXT")  # databases made before the column existed
+    except sqlite3.OperationalError:
+        pass  # already there (the bot, panel and transcriber all run this at startup)
     return conn
 
 
@@ -373,12 +378,21 @@ def delete_call(conn, call_id):
 
 
 def untranscribed_clips(conn, limit=20):
-    return conn.execute("SELECT * FROM voice_clips WHERE text IS NULL AND error IS NULL ORDER BY id LIMIT ?", (limit,)).fetchall()
+    """Clips waiting for text, oldest first, each with `ready_at`: the unix time its sentence ended."""
+    return conn.execute("SELECT v.*, c.started_at + (v.start_ms + v.duration_ms) / 1000.0 AS ready_at FROM voice_clips v "
+                        "JOIN voice_calls c ON c.id = v.call_id WHERE v.text IS NULL AND v.error IS NULL ORDER BY v.id LIMIT ?",
+                        (limit,)).fetchall()
 
 
-def save_transcript(conn, clip_id, text=None, error=None):
+def clip_to_upgrade(conn, model):
+    """A clip from a finished call that a weaker model wrote, to redo with `model`. Noise-only clips stay empty with any model."""
+    return conn.execute("SELECT v.* FROM voice_clips v JOIN voice_calls c ON c.id = v.call_id WHERE c.status != 'recording' "
+                        "AND v.text != '' AND v.model IS NOT NULL AND v.model != ? ORDER BY v.id LIMIT 1", (model,)).fetchone()
+
+
+def save_transcript(conn, clip_id, text=None, error=None, model=None):
     with conn:
-        conn.execute("UPDATE voice_clips SET text = ?, error = ? WHERE id = ?", (text, error, clip_id))
+        conn.execute("UPDATE voice_clips SET text = ?, error = ?, model = ? WHERE id = ?", (text, error, model, clip_id))
 
 
 def autojoin_channels(conn):

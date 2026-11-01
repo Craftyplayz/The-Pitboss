@@ -112,7 +112,7 @@ class LiveTranscript(unittest.TestCase):
         from cogs.record import live_text
         clips = [self.clip(1, "Raygun (@craftyplayz)", 2000, "Oh my god, it's a cat."), self.clip(1, "Raygun (@craftyplayz)", 4000, "Hi *Mr* Fluffins."),
                  self.clip(2, "Huski (@huski)", 5000, ""), self.clip(2, "Huski (@huski)", 6000, None), self.clip(2, "Huski (@huski)", 65000, "Roll for it.")]
-        self.assertEqual(live_text(clips), "**Raygun** `0:02`\nOh my god, it's a cat.\nHi \*Mr\* Fluffins.\n\n**Huski** `1:05`\nRoll for it.")
+        self.assertEqual(live_text(clips), "**Raygun** `0:02`\nOh my god, it's a cat.\nHi \\*Mr\\* Fluffins.\n\n**Huski** `1:05`\nRoll for it.")
 
     def test_only_the_newest_lines_fit(self):
         from cogs.record import live_text
