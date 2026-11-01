@@ -1,3 +1,5 @@
 discord.py==2.7.1
 davey==0.1.7
+# shortcut: unmerged DAVE receive fix (PR #54), move to a PyPI release once upstream merges one
+discord-ext-voice-recv @ https://github.com/rdphillips7/discord-ext-voice-recv/archive/ddd28601fe556f585b869e215f29c8236b95f88f.zip
 pillow==11.0.0
