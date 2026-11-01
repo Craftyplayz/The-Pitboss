@@ -2,14 +2,12 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
-### Unreleased
+## 1.8.0
 
-Not posted yet: the bot only reads `## ` headings. Becomes a version once approved.
-
-- The control panel is now The Pitstop, with a sidebar of tabs: Welcome & Roles, Utility, Leveling, Games, Voice (behind a second password), Translate, Setup and Logs.
-- New Server Log: the bot records what happens in the server (edited and deleted messages, joins and leaves, name, avatar and role changes, statuses, voice, channels, roles, server settings and the audit log). Browse and filter it in the Logs tab, or download it as a spreadsheet.
-- Role menus: admins build them in the control panel, and members click buttons, pick from a dropdown or react with an emoji to get or drop roles.
-- Welcome messages are now embeds. Admins design them in the control panel with a live preview of exactly how they'll look in Discord.
+- Role menus: pick your own roles by clicking a button, choosing from a dropdown or reacting with an emoji. Click again to drop a role.
+- Welcome messages are now embeds, designed by admins in the control panel with a live preview.
+- The control panel is now called The Pitstop, with a tab for each part of the bot.
+- New server log: the bot keeps a record of what happens in the server, like edited and deleted messages, joins and leaves, and role changes. Only admins can see it.
 
 ## 1.7.1
 
