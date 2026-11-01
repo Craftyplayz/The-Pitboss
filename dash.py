@@ -11,6 +11,7 @@ import html
 import io
 import json
 import os
+import re
 import secrets
 import shutil
 import time
@@ -24,7 +25,7 @@ from aiohttp import web
 from cogs.welcome import load as load_welcome
 from core import rolemenus
 from core.embeds import GOLD, LIMITS, clean as clean_embed, render as render_embed
-from core import db
+from core import db, review
 from core.events import CATEGORIES, default_categories
 from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR, clock, short_name
 
@@ -52,7 +53,8 @@ SPEAKER_COLOURS = ["#5ab0f0", "#F0C35A", "#4fc98a", "#c792ea", "#f09a5a", "#5ad1
 LOCAL_TIMES = "document.querySelectorAll('time[data-t]').forEach(t=>{t.textContent=new Date(t.dataset.t*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'medium'})});"
 # The call player: CLIPS is [[clip id, start ms, length ms]]. Each clip is fetched and started at its place in the
 # call (Web Audio), 15 s ahead of the playhead, so overlapping speakers play together. `gen` drops clips that finish
-# loading after a pause or seek. While live, the page reloads unless something is playing or being searched.
+# loading after a pause or seek. While live or while Claude works, the page reloads unless something is playing,
+# being searched or being filled in.
 CALL_JS = """let ctx,gain,playing=false,pos=0,anchor=0,gen=0,srcs=[],queued=new Set(),dragging=false,lit=null;
 const cache=new Map(),$=id=>document.getElementById(id),lines=[...document.querySelectorAll('.ln')];
 const fmt=ms=>{let s=Math.max(0,Math.floor(ms/1000)),h=Math.floor(s/3600),m=Math.floor(s/60)%60;s%=60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
@@ -82,7 +84,9 @@ document.querySelectorAll('time[data-tt]').forEach(t=>{t.textContent=new Date(t.
 $('find').oninput=()=>{const q=$('find').value.toLowerCase();lines.forEach(l=>l.hidden=!!q&&!l.textContent.toLowerCase().includes(q));
  document.querySelectorAll('.msg').forEach(m=>m.hidden=![...m.querySelectorAll('.ln')].some(l=>!l.hidden));
  document.querySelectorAll('.jl').forEach(j=>j.hidden=!!q)};
-if(LIVE)setInterval(()=>{if(!playing&&!$('find').value)location.reload()},5000);"""
+if($('orig'))$('orig').onchange=()=>document.querySelectorAll('.ln[data-o]').forEach(l=>{const t=l.textContent;l.textContent=l.dataset.o;l.dataset.o=t});
+const filling=()=>[...document.querySelectorAll('.keep input,.keep textarea')].some(i=>/radio|checkbox/.test(i.type)?i.checked:i.value);
+if(LIVE)setInterval(()=>{if(!playing&&!$('find').value&&!filling())location.reload()},5000);"""
 
 
 def sign(data, key):
@@ -455,7 +459,12 @@ def voice_settings_card(app, channels):
             '<p><small>The live model writes each line as soon as someone stops talking, so the transcript keeps up. The final '
             'model then rewrites every line, oldest first, whenever nothing is waiting for the live model: it falls behind in busy '
             'moments and catches up when it\'s quiet or after the call. small.en live and large-v3-turbo final is a good pair on '
-            'a 6-core CPU.</small></p><button class="btn" type="submit">Save</button></form>')
+            'a 6-core CPU.</small></p>'
+            f'<label for="glossary">Glossary</label><textarea id="glossary" name="glossary" maxlength="20000" '
+            f'placeholder="Veyra (heard as Vera, Bayra)">{html.escape(db.get_setting(app["db"], "voice_glossary") or "")}</textarea>'
+            '<p><small>Names and words Claude should spell this way, one per line. It goes with every review, summary and question, '
+            'so Claude doesn\'t ask about them again. Spellings you confirm on a call page are added here.</small></p>'
+            '<button class="btn" type="submit">Save</button></form>')
 
 
 def fast_model(app):
@@ -469,22 +478,39 @@ def call_status(c):
     return CALL_STATUS.get(c["status"], c["status"]) + pending
 
 
+def claude_on(app):
+    """Whether the transcriber has an Anthropic key: it says so in a setting when it starts."""
+    return db.get_setting(app["db"], "voice_claude") == "1"
+
+
+def review_state(call, ready, open_questions, on):
+    """Where Claude's review of a call stands, for the call list and the call page."""
+    status = call["review_status"]
+    if not on and status != "done":
+        return "Off"
+    return {None: "Reviewing…" if ready else "Waiting for final transcript",
+            "questions": f"{open_questions} question{'s' * (open_questions != 1)} waiting",
+            "summarise": "Writing summary…", "done": "Summary ready",
+            "failed": f'<span class="bad">Failed</span>: {html.escape(call["review_error"] or "")}',
+            "old": "Not reviewed (recorded before reviews)", "short": "Too short to review"}.get(status, status)
+
+
 def calls_card(app):
-    e = html.escape
+    e, on = html.escape, claude_on(app)
     rows = "".join(
         f'<tr><td><a href="/voice/call/{c["id"]}">{utc_time(c["started_at"])}</a></td><td>🔊{e(c["channel_name"])}</td>'
         f'<td>{clock(((c["ended_at"] or int(time.time())) - c["started_at"]) * 1000)}</td>'
         f'<td>{e(", ".join(short_name(n) for n in (c["speakers"] or "").split(",") if n))}</td>'
-        f'<td>{call_status(c)}</td></tr>' for c in db.voice_calls(app["db"]))
+        f'<td>{call_status(c)}</td><td>{review_state(c, c["status"] != "recording" and not c["unfinal"], c["open"], on)}</td></tr>'
+        for c in db.voice_calls(app["db"], review.final_model(app["db"])))
     # shortcut: shows the newest 100 calls only; add paging when there are more
-    return card("Calls", f'<table><tr><th>Started</th><th>Channel</th><th>Length</th><th>Speakers</th><th>Status</th></tr>{rows}</table>'
-                if rows else "<p>No calls recorded yet.</p>")
+    return card("Calls", '<table><tr><th>Started</th><th>Channel</th><th>Length</th><th>Speakers</th><th>Status</th><th>Review</th></tr>'
+                f'{rows}</table>' if rows else "<p>No calls recorded yet.</p>")
 
 
 async def voice_tab(request):
     app = request.app
-    return (calls_card(app) + voice_settings_card(app, await guild_channels(app)) + soon("AI summaries of each call")
-            + f"<script>{LOCAL_TIMES}</script>")
+    return calls_card(app) + voice_settings_card(app, await guild_channels(app)) + f"<script>{LOCAL_TIMES}</script>"
 
 
 async def voice_settings(request):
@@ -510,6 +536,10 @@ async def voice_settings(request):
     if model != (db.get_setting(app["db"], "voice_model") or DEFAULT_MODEL):
         db.set_setting(app["db"], "voice_model", model)
         panel_log(app, user, f"set the final speech-to-text model: {model}")
+    glossary = posted.get("glossary", "").strip()[:20000]
+    if "glossary" in posted and glossary != (db.get_setting(app["db"], "voice_glossary") or ""):
+        db.set_setting(app["db"], "voice_glossary", glossary)
+        panel_log(app, user, "edited the voice glossary")
     raise web.HTTPFound("/voice?saved")
 
 
@@ -544,12 +574,101 @@ def clip_text(clip):
     return "<i class=wait>Transcribing…</i>"
 
 
-def transcript_line(c):
+def transcript_line(c, fixes=()):
     written_by = f' title="{html.escape(c["model"])}"' if c["model"] else ""  # hover to see which model wrote it
-    return f'<p class="ln" data-s="{c["start_ms"]}" data-e="{c["start_ms"] + c["duration_ms"]}"{written_by}>{clip_text(c)}</p>'
+    fixed = review.fix_text(c["text"], fixes) if c["text"] else c["text"]
+    # corrected lines keep the original for "Show original text"
+    original, text = (f' data-o="{html.escape(c["text"])}"', html.escape(fixed)) if fixed != c["text"] else ("", clip_text(c))
+    return f'<p class="ln" data-s="{c["start_ms"]}" data-e="{c["start_ms"] + c["duration_ms"]}"{written_by}{original}>{text}</p>'
 
 
-def timeline(call, clips, joins, faces, colours):
+STAMP = re.compile(r"\[(\d+(?::\d\d){1,2})\]")
+
+
+def stamps(text):
+    """Escaped text where each [1:18:08] is a button that jumps the player there."""
+    def seek(m):
+        h, mi, s = ([0] + [int(p) for p in m[1].split(":")])[-3:]
+        return f'<button type="button" class="tt" data-seek="{(h * 3600 + mi * 60 + s) * 1000}">[{m[1]}]</button>'
+    return STAMP.sub(seek, html.escape(text)).replace("\n", "<br>")
+
+
+def summary_card(call):
+    s = json.loads(call["summary"])
+
+    def items(xs):
+        return "<ul>" + "".join(f"<li>{stamps(x)}</li>" for x in xs) + "</ul>" if xs else "<p><small>None.</small></p>"
+    people = "".join(f'<h3>{html.escape(p["name"])}</h3>{items(p["points"])}' for p in s["people"])
+    return card("Summary", f'<p>{stamps(s["overview"])}</p><h3>Topics</h3>{items(s["topics"])}'
+                           f'<h3>Decisions</h3>{items(s["decisions"])}{people}')
+
+
+def question_field(q, starts):
+    """One of Claude's questions: its guess, my own spelling, or leave the words as they are."""
+    e, qid = html.escape, q["id"]
+    heard = "; ".join(f'“{e(v["text"])}” ' + " ".join(f'<button type="button" class="tt" data-seek="{starts[i]}">{clock(starts[i])}</button>'
+                                                      for i in v["clips"][:6] if i in starts)
+                      for v in json.loads(q["variants"]))
+    return (f'<fieldset class="q"><p>{e(q["question"])}</p><p><small>Heard as {heard}</small></p>'
+            f'<label class="check"><input type="radio" name="q{qid}" value="guess"> Claude\'s guess: <b>{e(q["guess"])}</b>'
+            f' <small>({e(q["confidence"])} confidence)</small></label>'
+            f'<label class="check"><input type="radio" name="q{qid}" value="own"> My answer:'
+            f'<input name="own{qid}" maxlength="100" aria-label="My answer" '
+            f'onfocus="this.closest(\'label\').querySelector(\'[type=radio]\').checked=true"></label>'
+            f'<label class="check"><input type="radio" name="q{qid}" value="leave"> Leave as is</label></fieldset>')
+
+
+def rerun_button(call, what, label):
+    return (f'<form method="post" action="/voice/call/{call["id"]}/rerun" style="display:inline"><input type="hidden" name="what" '
+            f'value="{what}"><button class="btn ghost" type="submit">{label}</button></form>')
+
+
+def review_card(app, call, questions, clips):
+    """Above the transcript: Claude's questions, or where the review stands, and the answers so far."""
+    e = html.escape
+    if not claude_on(app):
+        return card("Review", "<p>Claude reviews are off. Set <code>ANTHROPIC_API_KEY</code> on the transcriber to turn them on.</p>")
+    status, waiting = call["review_status"], [q for q in questions if q["answer"] is None]
+    if status == "questions" and waiting:
+        starts = {c["id"]: c["start_ms"] for c in clips}
+        body = (f'<form method="post" action="/voice/call/{call["id"]}/answer" class="keep">'
+                + "".join(question_field(q, starts) for q in waiting)
+                + '<p><small>Answer some or all of them. Claude may ask follow-ups once every question is answered.</small></p>'
+                  '<button class="btn" type="submit">Save answers</button></form>')
+    else:
+        body = f'<p>{review_state(call, db.call_ready(app["db"], call["id"], review.final_model(app["db"])), 0, True)}</p>'
+    done = [q for q in questions if q["answer"] is not None]
+    if done:
+        body += (f'<details><summary>{len(done)} answered</summary><ul>' + "".join(
+            f'<li>{e(q["question"])} <b>{e(q["answer"]) or "Leave as is"}</b></li>' for q in done) + "</ul></details>")
+    if status in ("done", "failed", "old"):
+        body += rerun_button(call, "review", "Review this call" if status == "old" else "Re-run review")
+    if status == "done":
+        body += " " + rerun_button(call, "summary", "Re-run summary")
+    return f'<div class="card" id="review"><h2>Review</h2>{body}</div>'
+
+
+def ask_card(app, call, asks):
+    """Questions about the call, newest first. Claude reads the summary and the whole corrected transcript."""
+    e = html.escape
+    others = "".join(f'<label class="check"><input type="checkbox" name="include" value="{c["id"]}"> '
+                     f'{utc_time(c["started_at"])} · 🔊{e(c["channel_name"])}</label>'
+                     for c in db.summarised_calls(app["db"]) if c["id"] != call["id"])
+    form = (f'<form method="post" action="/voice/call/{call["id"]}/ask" class="keep">'
+            '<textarea name="question" maxlength="1000" required aria-label="Your question" '
+            'placeholder="What did Huski say about the rat king?"></textarea>'
+            + (f'<details><summary>Also send the summaries of other calls</summary>{others}</details>' if others else "")
+            + '<button class="btn" type="submit">Ask</button></form>')
+
+    def reply(a):
+        if a["answer"] is not None:
+            return f'<p>{stamps(a["answer"])}</p>'
+        return f'<p class="bad">Couldn\'t answer: {e(a["error"])}</p>' if a["error"] else "<p><i class=wait>Thinking…</i></p>"
+    shown = "".join(f'<div class="ask"><p class="aq">{e(a["question"])}</p>{reply(a)}</div>' for a in asks)
+    return f'<div class="card" id="ask"><h2>Ask about this call</h2>{form}{shown}</div>'
+
+
+def timeline(call, clips, joins, faces, colours, fixes=()):
     """Messages grouped by speaker, like a chat, with join and leave markers between them."""
     e = html.escape
     items = [(c["start_ms"], 1, c) for c in clips if c["text"] != ""]  # "" was only noise
@@ -567,7 +686,7 @@ def timeline(call, clips, joins, faces, colours):
             out.append(f'<div class="jl">{e(short_name(name or "Someone"))} {"joined" if joined else "left"} · <time data-tt="{at}"></time></div>')
             continue
         first, run = g
-        lines = "".join(transcript_line(c) for c in run)
+        lines = "".join(transcript_line(c, fixes) for c in run)
         out.append(f'<div class="msg"><img class="av" src="{e(faces[first["member_id"]])}" alt=""><div>'
                    f'<div class="mh"><b style="color:{colours[first["member_id"]]}">{e(short_name(first["member_name"]))}</b>'
                    f'<button type="button" class="tt" data-seek="{first["start_ms"]}">{clock(first["start_ms"])}</button></div>{lines}</div></div>')
@@ -588,7 +707,10 @@ async def voice_call(request):
         names[c["member_id"]] = short_name(c["member_name"])
     faces = await avatars(app, list(colours))
     length_ms = ((call["ended_at"] or int(time.time())) - call["started_at"]) * 1000
-    live = call["status"] == "recording" or any(c["text"] is None and not c["error"] for c in clips)
+    questions, asks, on = db.call_questions(app["db"], call["id"]), db.call_asks(app["db"], call["id"]), claude_on(app)
+    fixes = review.fixes(questions)
+    claude_working = on and (call["review_status"] in (None, "summarise") or any(a["answer"] is None and not a["error"] for a in asks))
+    live = call["status"] == "recording" or any(c["text"] is None and not c["error"] for c in clips) or claude_working
     # the player schedules every clip at its place in the call, so people talking over each other play together
     player_clips = json.dumps([[c["id"], c["start_ms"], c["duration_ms"]] for c in clips if c["text"] != ""])
     delete = ("<small>Stop the recording before deleting this call.</small>" if call["status"] == "recording" else
@@ -601,8 +723,11 @@ async def voice_call(request):
                 f'<span class="faces">{faces_html}</span>')
     body = (f'<div class="callbar"><a href="/voice">← All calls</a><span><a class="btn ghost" href="/voice/call/{call["id"]}.txt">'
             f'Download transcript</a> {delete}</span></div>'
-            f'<input id="find" type="search" placeholder="Search the transcript">'
-            f'<div id="tls">{timeline(call, clips, db.call_joins(app["db"], call), faces, colours) or "<p class=empty>Nothing said yet.</p>"}</div>'
+            + (summary_card(call) if call["summary"] else "") + review_card(app, call, questions, clips)
+            + (ask_card(app, call, asks) if call["summary"] and on else "")
+            + ('<label class="check"><input type="checkbox" id="orig"> Show original text (before corrections)</label>' if fixes else "")
+            + f'<input id="find" type="search" placeholder="Search the transcript">'
+            f'<div id="tls">{timeline(call, clips, db.call_joins(app["db"], call), faces, colours, fixes) or "<p class=empty>Nothing said yet.</p>"}</div>'
             '<div id="player"><button type="button" class="pb" id="back" aria-label="Back 15 seconds">↺15</button>'
             '<button type="button" class="pb play" id="pp" aria-label="Play">▶</button>'
             '<button type="button" class="pb" id="fwd" aria-label="Forward 15 seconds">15↻</button>'
@@ -619,9 +744,7 @@ async def voice_call_txt(request):
     call = db.get_call(request.app["db"], int(request.match_info["id"]))
     if not call:
         raise web.HTTPNotFound()
-    lines = [f"[{clock(c['start_ms'])}] {short_name(c['member_name'])}: {c['text']}"
-             for c in db.call_clips(request.app["db"], call["id"]) if c["text"]]
-    return web.Response(text="\n".join(lines) + "\n", content_type="text/plain", charset="utf-8",
+    return web.Response(text=review.call_text(request.app["db"], call) + "\n", content_type="text/plain", charset="utf-8",
                         headers={"Content-Disposition": f'attachment; filename="call-{call["id"]}.txt"'})
 
 
@@ -636,6 +759,61 @@ async def voice_call_delete(request):
     db.delete_call(app["db"], call["id"])
     panel_log(app, user, f"deleted voice call {call['id']} (🔊{call['channel_name']})")
     raise web.HTTPFound("/voice")
+
+
+def posted_call(request):
+    """(app, user, call) for a form posted from a call page."""
+    app, user = request.app, check_post(request)
+    call = db.get_call(app["db"], int(request.match_info["id"]))
+    if not call:
+        raise web.HTTPNotFound()
+    return app, user, call
+
+
+async def voice_answer(request):
+    """Save answers to Claude's questions. Once all are answered, the transcriber's review thread runs the next round."""
+    app, user, call = posted_call(request)
+    posted = await request.post()
+    for q in db.call_questions(app["db"], call["id"]):
+        choice = posted.get(f"q{q['id']}")
+        answer = {"guess": q["guess"], "leave": "", "own": posted.get(f"own{q['id']}", "").strip()[:100] or None}.get(choice)
+        if q["answer"] is not None or answer is None:
+            continue
+        db.answer_question(app["db"], q["id"], answer)
+        if answer:
+            review.add_to_glossary(app["db"], answer, [v["text"] for v in json.loads(q["variants"])])
+        panel_log(app, user, f'answered Claude on voice call {call["id"]}: "{q["question"]}" → {answer or "leave as is"}')
+    if call["review_status"] == "questions" and all(q["answer"] is not None for q in db.call_questions(app["db"], call["id"])):
+        db.update_call(app["db"], call["id"], review_status=None)
+    raise web.HTTPFound(f"/voice/call/{call['id']}#review")
+
+
+async def voice_rerun(request):
+    app, user, call = posted_call(request)
+    what = (await request.post()).get("what")
+    if what == "review" and call["review_status"] in ("done", "failed", "old"):
+        db.rerun_review(app["db"], call["id"])
+    elif what == "summary" and call["review_status"] == "done":
+        db.update_call(app["db"], call["id"], review_status="summarise")
+    else:
+        raise web.HTTPBadRequest(text="Can't re-run that now")
+    panel_log(app, user, f"re-ran Claude's {what} of voice call {call['id']} (🔊{call['channel_name']})")
+    raise web.HTTPFound(f"/voice/call/{call['id']}#review")
+
+
+async def voice_ask(request):
+    """Queue a question; the transcriber's review thread answers it and the page shows it on its next reload."""
+    app, user, call = posted_call(request)
+    posted = await request.post()
+    question = posted.get("question", "").strip()
+    if not call["summary"] or not claude_on(app) or not 0 < len(question) <= 1000:
+        raise web.HTTPBadRequest(text="Ask needs a summary, Claude turned on, and a question up to 1000 characters")
+    allowed = {c["id"] for c in db.summarised_calls(app["db"])} - {call["id"]}
+    include = sorted({int(v) for v in posted.getall("include", []) if v.isdigit() and int(v) in allowed})
+    db.add_ask(app["db"], call["id"], question, include, int(time.time()))
+    with_others = f" (with {len(include)} other call summaries)" if include else ""
+    panel_log(app, user, f'asked Claude about voice call {call["id"]}: "{question[:200]}"{with_others}')
+    raise web.HTTPFound(f"/voice/call/{call['id']}#ask")
 
 
 async def voice_clip(request):
@@ -939,6 +1117,11 @@ main.wide{max-width:none}
 .tt{color:var(--mu);font-size:12px;font-variant-numeric:tabular-nums;background:none;border:0;padding:0}button.tt{cursor:pointer}button.tt:hover{color:var(--tx)}
 .msg>div{min-width:0}.ln{margin:4px 0 0 -8px;padding:3px 8px;border-radius:6px;cursor:pointer;line-height:1.55;overflow-wrap:anywhere}.ln:hover{background:var(--card)}
 .ln.on{background:rgba(240,195,90,.15)}.ln .wait{color:var(--mu)}
+.card h3{font:600 12px Inter,system-ui,sans-serif;color:var(--mu);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 4px}
+.card details{margin:10px 0}.card summary{color:var(--mu);cursor:pointer;font-size:13px}
+.q{border:0;border-bottom:1px solid var(--line);padding:10px 0;margin:0}.q p{margin:0 0 4px}.q label.check{margin:6px 0}
+.q input[name^=own]{width:auto;flex:1;padding:5px 8px}.ask{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+.aq{font-weight:600;margin-bottom:4px}.ask .wait{color:var(--mu)}
 .jl{font-size:12px;font-style:italic;color:var(--mu);padding:8px 0 8px 54px;border-bottom:1px solid var(--line)}
 #player{position:sticky;bottom:12px;margin-top:16px;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
 border-radius:var(--r);padding:10px 16px;box-shadow:0 8px 28px rgba(0,0,0,.45)}#player #bar{flex:1;width:auto;min-width:60px;accent-color:var(--gold)}
@@ -1120,7 +1303,8 @@ def make_app():
                     web.get("/callback", callback), web.get("/logout", logout),
                     web.post("/voice/settings", voice_settings), web.get(r"/voice/call/{id:\d+}", voice_call),
                     web.get(r"/voice/call/{id:\d+}.txt", voice_call_txt), web.post(r"/voice/call/{id:\d+}/delete", voice_call_delete),
-                    web.get(r"/voice/clip/{id:\d+}.ogg", voice_clip),
+                    web.get(r"/voice/clip/{id:\d+}.ogg", voice_clip), web.post(r"/voice/call/{id:\d+}/answer", voice_answer),
+                    web.post(r"/voice/call/{id:\d+}/rerun", voice_rerun), web.post(r"/voice/call/{id:\d+}/ask", voice_ask),
                     web.get("/logs/export", logs_export), web.get("/logs/file/{name}", log_file),
                     web.get(r"/rolemenu/{id:new|\d+}", rolemenu_get), web.post(r"/rolemenu/{id:new|\d+}", rolemenu_save),
                     web.post(r"/rolemenu/{id:\d+}/delete", rolemenu_delete),

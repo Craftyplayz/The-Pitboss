@@ -3,7 +3,9 @@
 Two workers run side by side. The live worker writes every new clip with the fast live model straight away, so the
 transcript keeps up with the conversation. The final worker rewrites each of those lines with the accurate final model,
 oldest first, but only starts a clip while nothing waits for the live worker: in a busy call it falls behind, and in
-quiet moments and after the call it catches up. A line the final model wrote is never redone."""
+quiet moments and after the call it catches up. A line the final model wrote is never redone.
+
+With ANTHROPIC_API_KEY set, a third thread has Claude review each call once its transcript is final (core/review.py)."""
 import os
 import threading
 import time
@@ -12,7 +14,7 @@ import av
 import numpy as np
 from faster_whisper import WhisperModel
 
-from core import db
+from core import db, review
 from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR
 
 # models download here once, on the shared volume, so restarts don't fetch them again
@@ -100,6 +102,10 @@ def main():
                                             download_root=str(MODEL_DIR))
             return loaded[name]
 
+    claude = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    db.set_setting(db.connect(db_path), "voice_claude", "1" if claude else "")  # the call page says when reviews are off
+    if claude:  # waits on the network, not the CPU, so it never slows transcription
+        threading.Thread(target=review.worker, args=(db_path,), daemon=True).start()
     threading.Thread(target=worker, args=(db_path, models, lambda live, final: final, final_step, 1), daemon=True).start()
     worker(db_path, models, lambda live, final: live, live_step, 0.25)
 

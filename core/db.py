@@ -86,7 +86,12 @@ CREATE TABLE IF NOT EXISTS voice_calls (
     started_by   INTEGER,           -- member who ran /record start; NULL when auto-joined
     started_at   INTEGER NOT NULL,  -- unix seconds
     ended_at     INTEGER,
-    status       TEXT NOT NULL      -- recording, done, interrupted (bot restarted mid-call)
+    status       TEXT NOT NULL,     -- recording, done, interrupted (bot restarted mid-call)
+    -- Claude's review, the step it waits for: NULL (review a round once the transcript is final), questions (waiting
+    -- for answers), summarise, done, failed, old (recorded before reviews existed) or short (too little said)
+    review_status TEXT,
+    review_error  TEXT,
+    summary       TEXT              -- JSON from core/review.py
 );
 CREATE TABLE IF NOT EXISTS voice_clips (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,6 +106,25 @@ CREATE TABLE IF NOT EXISTS voice_clips (
     model       TEXT               -- speech-to-text model that wrote `text`; NULL before this was tracked
 );
 CREATE INDEX IF NOT EXISTS voice_clips_call ON voice_clips (call_id, start_ms);
+CREATE TABLE IF NOT EXISTS voice_questions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id    INTEGER NOT NULL,
+    round      INTEGER NOT NULL,  -- answering every question of a round lets Claude ask follow-ups in the next
+    question   TEXT NOT NULL,
+    variants   TEXT NOT NULL,     -- JSON [{"text": "Vera", "clips": [clip ids]}]
+    guess      TEXT NOT NULL,
+    confidence TEXT NOT NULL,     -- high, medium, low
+    answer     TEXT               -- NULL until answered; "" means leave as is
+);
+CREATE TABLE IF NOT EXISTS voice_asks (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id  INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    include  TEXT NOT NULL,       -- JSON ids of other calls whose summaries go along
+    asked_at INTEGER NOT NULL,
+    answer   TEXT,                -- NULL while Claude thinks
+    error    TEXT
+);
 """
 
 
@@ -109,10 +133,16 @@ def connect(path):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    try:
-        conn.execute("ALTER TABLE voice_clips ADD COLUMN model TEXT")  # databases made before the column existed
-    except sqlite3.OperationalError:
-        pass  # already there (the bot, panel and transcriber all run this at startup)
+    # databases made before these columns existed
+    for table, column in (("voice_clips", "model"), ("voice_calls", "review_status"), ("voice_calls", "review_error"),
+                          ("voice_calls", "summary")):
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+        except sqlite3.OperationalError:
+            continue  # already there (the bot, panel and transcriber all run this at startup)
+        if column == "review_status":
+            with conn:  # calls recorded before reviews existed only get one from the call page's button
+                conn.execute("UPDATE voice_calls SET review_status = 'old'")
     return conn
 
 
@@ -340,12 +370,19 @@ def add_clip(conn, call_id, member_id, member_name, start_ms, duration_ms, file)
                      (call_id, member_id, member_name, start_ms, duration_ms, file))
 
 
-def voice_calls(conn, limit=100):
-    """Newest calls first, each with its speakers and how many clips still wait for text."""
+# a clip still waiting for the final model (`?`): no text yet, or a line another model wrote. Noise, failed clips
+# and lines from before models were tracked never get rewritten, so they count as final.
+NOT_FINAL = "v.error IS NULL AND (v.text IS NULL OR (v.text != '' AND v.model IS NOT NULL AND v.model != ?))"
+
+
+def voice_calls(conn, final_model, limit=100):
+    """Newest calls first, each with its speakers, how many clips still wait for text or for the final model,
+    and how many review questions wait for an answer."""
     return conn.execute(
         "SELECT c.*, GROUP_CONCAT(DISTINCT v.member_name) AS speakers, "
-        "SUM(v.text IS NULL AND v.error IS NULL) AS pending FROM voice_calls c "
-        "LEFT JOIN voice_clips v ON v.call_id = c.id GROUP BY c.id ORDER BY c.id DESC LIMIT ?", (limit,)).fetchall()
+        f"SUM(v.text IS NULL AND v.error IS NULL) AS pending, SUM({NOT_FINAL}) AS unfinal, "
+        "(SELECT COUNT(*) FROM voice_questions q WHERE q.call_id = c.id AND q.answer IS NULL) AS open FROM voice_calls c "
+        "LEFT JOIN voice_clips v ON v.call_id = c.id GROUP BY c.id ORDER BY c.id DESC LIMIT ?", (final_model, limit)).fetchall()
 
 
 def get_call(conn, call_id):
@@ -373,6 +410,8 @@ def get_clip(conn, clip_id):
 
 def delete_call(conn, call_id):
     with conn:
+        conn.execute("DELETE FROM voice_questions WHERE call_id = ?", (call_id,))
+        conn.execute("DELETE FROM voice_asks WHERE call_id = ?", (call_id,))
         conn.execute("DELETE FROM voice_clips WHERE call_id = ?", (call_id,))
         conn.execute("DELETE FROM voice_calls WHERE id = ?", (call_id,))
 
@@ -394,6 +433,78 @@ def clip_to_upgrade(conn, model):
 def save_transcript(conn, clip_id, text=None, error=None, model=None):
     with conn:
         conn.execute("UPDATE voice_clips SET text = ?, error = ?, model = ? WHERE id = ?", (text, error, model, clip_id))
+
+
+def call_ready(conn, call_id, final_model):
+    """Whether Claude may read the call: it ended and every clip has its final text."""
+    return conn.execute(f"SELECT status != 'recording' AND NOT EXISTS (SELECT 1 FROM voice_clips v WHERE v.call_id = c.id "
+                        f"AND {NOT_FINAL}) FROM voice_calls c WHERE c.id = ?", (final_model, call_id)).fetchone()[0] == 1
+
+
+def call_to_review(conn, final_model):
+    return conn.execute(f"SELECT * FROM voice_calls c WHERE review_status IS NULL AND status != 'recording' AND NOT EXISTS "
+                        f"(SELECT 1 FROM voice_clips v WHERE v.call_id = c.id AND {NOT_FINAL}) ORDER BY id LIMIT 1",
+                        (final_model,)).fetchone()
+
+
+def call_to_summarise(conn):
+    return conn.execute("SELECT * FROM voice_calls WHERE review_status = 'summarise' ORDER BY id LIMIT 1").fetchone()
+
+
+def update_call(conn, call_id, **fields):
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    with conn:
+        conn.execute(f"UPDATE voice_calls SET {cols} WHERE id = ?", (*fields.values(), call_id))
+
+
+def add_questions(conn, call_id, round_, questions):
+    """Store one round of Claude's questions; the call then waits for answers."""
+    with conn:
+        conn.executemany("INSERT INTO voice_questions (call_id, round, question, variants, guess, confidence) VALUES (?, ?, ?, ?, ?, ?)",
+                         [(call_id, round_, q["question"], json.dumps(q["variants"]), q["guess"], q["confidence"]) for q in questions])
+        conn.execute("UPDATE voice_calls SET review_status = 'questions', review_error = NULL WHERE id = ?", (call_id,))
+
+
+def call_questions(conn, call_id):
+    return conn.execute("SELECT * FROM voice_questions WHERE call_id = ? ORDER BY id", (call_id,)).fetchall()
+
+
+def answer_question(conn, question_id, answer):
+    with conn:
+        conn.execute("UPDATE voice_questions SET answer = ? WHERE id = ?", (answer, question_id))
+
+
+def rerun_review(conn, call_id):
+    """Review the call again: answers stay (and so do their corrections), unanswered questions and the summary go."""
+    with conn:
+        conn.execute("DELETE FROM voice_questions WHERE call_id = ? AND answer IS NULL", (call_id,))
+        conn.execute("UPDATE voice_calls SET review_status = NULL, review_error = NULL, summary = NULL WHERE id = ?", (call_id,))
+
+
+def add_ask(conn, call_id, question, include, at):
+    with conn:
+        conn.execute("INSERT INTO voice_asks (call_id, question, include, asked_at) VALUES (?, ?, ?, ?)",
+                     (call_id, question, json.dumps(include), at))
+
+
+def next_ask(conn):
+    return conn.execute("SELECT * FROM voice_asks WHERE answer IS NULL AND error IS NULL ORDER BY id LIMIT 1").fetchone()
+
+
+def save_ask(conn, ask_id, answer=None, error=None):
+    with conn:
+        conn.execute("UPDATE voice_asks SET answer = ?, error = ? WHERE id = ?", (answer, error, ask_id))
+
+
+def call_asks(conn, call_id):
+    """Newest first, like the call page shows them."""
+    return conn.execute("SELECT * FROM voice_asks WHERE call_id = ? ORDER BY id DESC", (call_id,)).fetchall()
+
+
+def summarised_calls(conn, ids=None):
+    """Calls with a summary, newest first; only `ids` when given."""
+    where = f" AND id IN ({','.join('?' * len(ids))})" if ids is not None else ""
+    return conn.execute(f"SELECT * FROM voice_calls WHERE summary IS NOT NULL{where} ORDER BY id DESC", tuple(ids or ())).fetchall()
 
 
 def autojoin_channels(conn):

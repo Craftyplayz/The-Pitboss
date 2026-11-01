@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import time
@@ -17,7 +18,9 @@ CHANNELS = [{"id": "10", "name": "Deadlock 1", "type": 2}, {"id": "11", "name": 
 USER = {"id": "5", "name": "Crafty"}
 
 
-class VoiceTab(unittest.IsolatedAsyncioTestCase):
+class VoiceCall(unittest.IsolatedAsyncioTestCase):
+    """A done call with fake rows, shared by the tests below."""
+
     async def asyncSetUp(self):
         self.dir = tempfile.TemporaryDirectory()
         with mock.patch.dict(os.environ, ENV):
@@ -54,6 +57,8 @@ class VoiceTab(unittest.IsolatedAsyncioTestCase):
     def cookies(self):
         self.client.session.cookie_jar.update_cookies({"session": dash.sign(USER | {"exp": time.time() + 600}, "secret")})
 
+
+class VoiceTab(VoiceCall):
     async def test_needs_a_login(self):
         page = await (await self.client.get("/voice")).text()
         self.assertIn("Log in with Discord", page)
@@ -134,3 +139,95 @@ class VoiceTab(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(db.get_call(self.db, self.call))
         self.assertEqual(db.call_clips(self.db, self.call), [])
         self.assertFalse((Path(self.dir.name) / str(self.call)).exists())
+
+
+class ClaudeReview(VoiceCall):
+    """The call page's Review, Summary and Ask sections, with fake rows instead of Claude."""
+    ORIGIN = {"Origin": "http://pitstop.test"}
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        db.set_setting(self.db, "voice_claude", "1")
+        self.cookies()
+
+    async def page(self):
+        return await (await self.client.get(f"/voice/call/{self.call}")).text()
+
+    async def post(self, what, data):
+        return await self.client.post(f"/voice/call/{self.call}/{what}", data=data, headers=self.ORIGIN, allow_redirects=False)
+
+    async def test_off_without_a_key(self):
+        db.set_setting(self.db, "voice_claude", "")
+        self.assertIn("Claude reviews are off", await self.page())
+        self.assertIn("<td>Off</td>", await (await self.client.get("/voice")).text())
+
+    async def test_states_on_the_call_list(self):
+        self.assertIn("Waiting for final transcript", await (await self.client.get("/voice")).text())  # one clip still transcribing
+        db.save_transcript(self.db, 4, text="bye")
+        self.assertIn("Reviewing…", await (await self.client.get("/voice")).text())
+        db.update_call(self.db, self.call, review_status="failed", review_error="overloaded <b>")
+        self.assertIn("Failed</span>: overloaded &lt;b&gt;", await (await self.client.get("/voice")).text())
+
+    async def test_questions_and_answers(self):
+        db.add_questions(self.db, self.call, 1, [
+            {"variants": [{"text": "hello", "clips": [1]}], "guess": "Hallo", "confidence": "high", "question": "Is <hello> Hallo?"},
+            {"variants": [{"text": "bob", "clips": [3]}], "guess": "Bobby", "confidence": "low", "question": "Is bob Bobby?"}])
+        page = await self.page()
+        self.assertIn("Is &lt;hello&gt; Hallo?", page)
+        self.assertIn('data-seek="0">0:00</button>', page)  # where it was heard, linked to the player
+        self.assertIn("2 questions waiting", await (await self.client.get("/voice")).text())
+        self.assertEqual((await self.client.post(f"/voice/call/{self.call}/answer", data={"q1": "guess"}, allow_redirects=False)).status, 403)
+        await self.post("answer", {"q1": "guess", "q2": "own", "own2": ""})  # an empty own answer stays unanswered
+        self.assertEqual([q["answer"] for q in db.call_questions(self.db, self.call)], ["Hallo", None])
+        self.assertEqual(db.get_call(self.db, self.call)["review_status"], "questions")  # waits for the rest
+        await self.post("answer", {"q2": "leave"})
+        self.assertIsNone(db.get_call(self.db, self.call)["review_status"])  # the next round can start
+        self.assertEqual(db.get_setting(self.db, "voice_glossary"), "Hallo (heard as hello)")
+        page = await self.page()
+        self.assertIn('data-o="hello there">Hallo there</p>', page)  # corrected, original kept for "Show original"
+        self.assertIn('id="orig"', page)
+        self.assertIn("Hallo there", await (await self.client.get(f"/voice/call/{self.call}.txt")).text())
+        logs = [r["summary"] for r in self.db.execute("SELECT summary FROM events WHERE kind = 'panel_change'")]
+        self.assertIn('Crafty answered Claude on voice call 1: "Is <hello> Hallo?" → Hallo', logs)
+        self.assertIn('Crafty answered Claude on voice call 1: "Is bob Bobby?" → leave as is', logs)
+
+    async def test_summary_and_ask(self):
+        self.assertNotIn("Ask about this call", await self.page())  # only once there's a summary
+        self.assertEqual((await self.post("ask", {"question": "Who?"})).status, 400)
+        db.update_call(self.db, self.call, review_status="done", summary=json.dumps(
+            {"overview": "A <short> chat.", "topics": ["Greetings [0:03]"], "decisions": [], "people": [{"name": "Ann", "points": ["Said hi"]}]}))
+        other = db.start_call(self.db, 99, SimpleNamespace(id=10, name="Deadlock 2"), 5, 500)
+        db.update_call(self.db, other, status="done", review_status="done", summary=db.get_call(self.db, self.call)["summary"])
+        page = await self.page()
+        self.assertIn("A &lt;short&gt; chat.", page)
+        self.assertIn('data-seek="3000">[0:03]</button>', page)
+        self.assertIn(f'name="include" value="{other}"', page)
+        self.assertIn("Re-run summary", page)
+        await self.post("ask", {"question": "  What did Ann say?  ", "include": [str(other), "999", "x"]})
+        ask = db.call_asks(self.db, self.call)[0]
+        self.assertEqual((ask["question"], json.loads(ask["include"])), ("What did Ann say?", [other]))  # unknown calls dropped
+        self.assertIn("Thinking…", await self.page())
+        db.save_ask(self.db, ask["id"], answer="Ann said hi [1:02:03].")
+        page = await self.page()
+        self.assertIn('data-seek="3723000">[1:02:03]</button>', page)
+        self.assertNotIn("Thinking…", page)
+        self.assertEqual((await self.post("ask", {"question": "x" * 1001})).status, 400)
+
+    async def test_rerun(self):
+        self.assertEqual((await self.post("rerun", {"what": "review"})).status, 400)  # still waiting for the transcript
+        db.update_call(self.db, self.call, review_status="old")
+        self.assertIn("Review this call", await self.page())
+        await self.post("rerun", {"what": "review"})
+        self.assertIsNone(db.get_call(self.db, self.call)["review_status"])
+        db.update_call(self.db, self.call, review_status="done", summary="{}")
+        await self.post("rerun", {"what": "summary"})
+        self.assertEqual(db.get_call(self.db, self.call)["review_status"], "summarise")
+        logs = [r["summary"] for r in self.db.execute("SELECT summary FROM events WHERE kind = 'panel_change'")]
+        self.assertIn("Crafty re-ran Claude's summary of voice call 1 (🔊Deadlock 1)", logs)
+
+    async def test_glossary_setting(self):
+        await self.client.post("/voice/settings", data={"model": "small.en", "glossary": " Veyra (heard as Vera) "}, headers=self.ORIGIN)
+        self.assertEqual(db.get_setting(self.db, "voice_glossary"), "Veyra (heard as Vera)")
+        await self.client.post("/voice/settings", data={"model": "small.en"}, headers=self.ORIGIN)  # a form without it keeps it
+        self.assertEqual(db.get_setting(self.db, "voice_glossary"), "Veyra (heard as Vera)")
+        self.assertIn("Veyra (heard as Vera)</textarea>", await (await self.client.get("/voice")).text())

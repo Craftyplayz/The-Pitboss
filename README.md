@@ -105,6 +105,7 @@ Copy `.env.example` to `.env` and fill it in:
 | `DISCORD_CLIENT_ID` | For the control panel | Developer Portal > your app > OAuth2 > Client ID |
 | `DISCORD_CLIENT_SECRET` | For the control panel | Developer Portal > your app > OAuth2 > Client Secret |
 | `DASH_URL` | No | The control panel's public address (default `https://pitstop.craftyplayz.com`). Add `<DASH_URL>/callback` as a redirect in Developer Portal > OAuth2 |
+| `ANTHROPIC_API_KEY` | No | Set on the transcriber to have Claude review each finished call: it asks about misheard names, writes a summary and answers questions about the call. Only transcript text is sent, never audio. Billed per use on your Anthropic API account (about US$1 per 4-hour call, plus a few cents per question). Leave empty to turn it off |
 
 ### 2. Run with Docker (recommended)
 ```sh

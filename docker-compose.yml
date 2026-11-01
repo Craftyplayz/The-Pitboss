@@ -51,6 +51,9 @@ services:
   transcriber:
     build: .
     command: ["python", "-u", "transcriber.py"]
+    environment:
+      # optional: Claude reviews and summarises finished calls (billed per use); leave empty to turn it off
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     restart: unless-stopped
     volumes:
       - pitboss-data:/app/data
