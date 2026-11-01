@@ -12,6 +12,7 @@ import io
 import json
 import os
 import secrets
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from core import rolemenus
 from core.embeds import GOLD, LIMITS, clean as clean_embed, render as render_embed
 from core import db
 from core.events import CATEGORIES, default_categories
+from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR
 
 PORT = int(os.environ.get("DASH_PORT", 8643))
 DISCORD = "https://discord.com/api/v10"
@@ -45,6 +47,18 @@ IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 SAFE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
               ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mp3": "audio/mpeg",
               ".ogg": "audio/ogg", ".wav": "audio/wav"}
+CALL_STATUS = {"recording": '<span class="ok">● Recording</span>', "done": "Done", "interrupted": '<span class="bad">Cut short</span> (bot restarted)'}
+SPEAKER_COLOURS = ["#5ab0f0", "#F0C35A", "#4fc98a", "#c792ea", "#f09a5a", "#5ad1c9", "#f05aa8", "#b0c45a"]
+# <time data-t> in the viewer's own time zone
+LOCAL_TIMES = "document.querySelectorAll('time[data-t]').forEach(t=>{t.textContent=new Date(t.dataset.t*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'medium'})});"
+# play a line, then carry on with the next; search hides lines; while live, reload unless something is playing or being searched
+CALL_JS = """const A=new Audio(),B=[...document.querySelectorAll('[data-clip]')];let cur=-1;
+function play(i){B.forEach(b=>b.textContent='▶');if(i>=B.length||B[i].closest('.tl').hidden){cur=-1;return}
+cur=i;A.src='/voice/clip/'+B[i].dataset.clip+'.ogg';A.play();B[i].textContent='❚❚'}
+B.forEach((b,i)=>b.onclick=()=>{if(cur===i&&!A.paused){A.pause();b.textContent='▶'}else play(i)});
+A.onended=()=>play(cur+1);
+find.oninput=()=>{const q=find.value.toLowerCase();document.querySelectorAll('.tl').forEach(l=>l.hidden=q&&!l.textContent.toLowerCase().includes(q))};
+if(%s)setInterval(()=>{if(A.paused&&!find.value)location.reload()},5000);"""
 
 
 def sign(data, key):
@@ -389,19 +403,165 @@ async def games_tab(request):
     return soon("Daily Wordle", "Marriages", "Giveaways")
 
 
+def voice_user(request):
+    """The logged-in user, if they unlocked the Voice tab in the last hour."""
+    user = session(request)
+    unlocked = unsign(request.cookies.get("voice"), request.app["secret"])
+    return user if user and unlocked and unlocked["id"] == user["id"] else None
+
+
+def clock(ms):
+    s = ms // 1000
+    return f"{s // 3600}:{s // 60 % 60:02}:{s % 60:02}" if s >= 3600 else f"{s // 60}:{s % 60:02}"
+
+
+def short_name(name):
+    return name.split(" (@")[0]  # "Display (@username)" from the recorder
+
+
+def utc_time(at):
+    return f'<time data-t="{at}">{datetime.fromtimestamp(at, timezone.utc):%Y-%m-%d %H:%M} UTC</time>'
+
+
+def voice_settings_card(app, channels):
+    picked = db.autojoin_channels(app["db"])
+    boxes = "".join(f'<label class="check"><input type="checkbox" name="autojoin" value="{c["id"]}"'
+                    f'{" checked" if int(c["id"]) in picked else ""}> 🔊 {html.escape(c["name"])}</label>'
+                    for c in channels if c["type"] in VOICE)
+    model = db.get_setting(app["db"], "voice_model") or DEFAULT_MODEL
+    options = "".join(f'<option{" selected" if m == model else ""}>{m}</option>' for m in MODELS)
+    return (f'<form method="post" action="/voice/settings" class="card"><h2>Settings</h2>'
+            f'<label>Join these channels by itself when someone is in them</label>{boxes or "<p>No voice channels.</p>"}'
+            '<p><small>Admins can also record any channel with /record start in Discord. The bot records one channel at a time.</small></p>'
+            f'<label for="model">Speech-to-text model</label><select id="model" name="model">{options}</select>'
+            '<p><small>small.en keeps up with live calls on a 6-core CPU. medium.en is more accurate but about 3 times slower. '
+            'A change applies to clips recorded after it.</small></p><button class="btn" type="submit">Save</button></form>')
+
+
+def call_status(c):
+    pending = f" · {c['pending']} transcribing" if c["pending"] else ""
+    return CALL_STATUS.get(c["status"], c["status"]) + pending
+
+
+def calls_card(app):
+    e = html.escape
+    rows = "".join(
+        f'<tr><td><a href="/voice/call/{c["id"]}">{utc_time(c["started_at"])}</a></td><td>🔊{e(c["channel_name"])}</td>'
+        f'<td>{clock(((c["ended_at"] or int(time.time())) - c["started_at"]) * 1000)}</td>'
+        f'<td>{e(", ".join(short_name(n) for n in (c["speakers"] or "").split(",") if n))}</td>'
+        f'<td>{call_status(c)}</td></tr>' for c in db.voice_calls(app["db"]))
+    # shortcut: shows the newest 100 calls only; add paging when there are more
+    return card("Calls", f'<table><tr><th>Started</th><th>Channel</th><th>Length</th><th>Speakers</th><th>Status</th></tr>{rows}</table>'
+                if rows else "<p>No calls recorded yet.</p>")
+
+
 async def voice_tab(request):
-    app, user = request.app, session(request)
+    app = request.app
     if not app["voice_password"]:
         return card("Locked", "<p>Set <code>VOICE_PASSWORD</code> on the dash container to turn this tab on.</p>")
-    unlocked = unsign(request.cookies.get("voice"), app["secret"])
-    if not unlocked or unlocked["id"] != user["id"]:
+    if not voice_user(request):
         wrong = '<p class="bad">Wrong password.</p>' if "wrong" in request.query else ""
         return card("Password needed", f'{wrong}<p>Voice transcripts and recordings need a second password.</p>'
                     '<form method="post" action="/voice/unlock"><label for="pw">Password</label>'
                     '<input id="pw" name="password" type="password" autocomplete="current-password" required>'
                     '<button class="btn" type="submit">Unlock</button></form>')
-    return soon("Voice call transcripts", "Raw audio recordings of each call", "AI summaries of each call") + \
-        '<p><small>Unlocked for an hour. <a href="/voice/lock">Lock now</a></small></p>'
+    return (calls_card(app) + voice_settings_card(app, await guild_channels(app)) + soon("AI summaries of each call")
+            + '<p><small>Unlocked for an hour. <a href="/voice/lock">Lock now</a></small></p>' + f"<script>{LOCAL_TIMES}</script>")
+
+
+async def voice_settings(request):
+    app, user = request.app, check_post(request)
+    if not voice_user(request):
+        raise web.HTTPForbidden()
+    posted = await request.post()
+    names = {c["id"]: c["name"] for c in await guild_channels(app) if c["type"] in VOICE}
+    picked = sorted(int(v) for v in posted.getall("autojoin", []) if v in names)
+    model = posted.get("model")
+    if model not in MODELS:
+        raise web.HTTPBadRequest(text="Unknown model")
+    if set(picked) != db.autojoin_channels(app["db"]):
+        db.set_setting(app["db"], "voice_autojoin", json.dumps(picked))
+        panel_log(app, user, "set voice auto-join channels: " + (", ".join(f"🔊{names[str(c)]}" for c in picked) or "none"))
+    if model != (db.get_setting(app["db"], "voice_model") or DEFAULT_MODEL):
+        db.set_setting(app["db"], "voice_model", model)
+        panel_log(app, user, f"set the speech-to-text model: {model}")
+    raise web.HTTPFound("/voice?saved")
+
+
+def transcript_line(clip, colour):
+    e = html.escape
+    if clip["text"] is not None:
+        text = e(clip["text"])
+    elif clip["error"]:
+        text = f'<i class="bad">Couldn\'t transcribe: {e(clip["error"])}</i>'
+    else:
+        text = "<i>Transcribing…</i>"
+    return (f'<div class="tl" style="--c:{colour}"><button type="button" class="ib" data-clip="{clip["id"]}" aria-label="Play">▶</button>'
+            f'<span class="tt">{clock(clip["start_ms"])}</span><b>{e(short_name(clip["member_name"]))}</b><span>{text}</span></div>')
+
+
+async def voice_call(request):
+    app, user = request.app, voice_user(request)
+    if not user:
+        raise web.HTTPFound("/voice")
+    call = db.get_call(app["db"], int(request.match_info["id"]))
+    if not call:
+        raise web.HTTPNotFound()
+    clips = db.call_clips(app["db"], call["id"])
+    colours = {}
+    for c in clips:
+        colours.setdefault(c["member_id"], SPEAKER_COLOURS[len(colours) % len(SPEAKER_COLOURS)])
+    lines = "".join(transcript_line(c, colours[c["member_id"]]) for c in clips if c["text"] != "")  # "" was only noise
+    live = call["status"] == "recording" or any(c["text"] is None and not c["error"] for c in clips)
+    delete = ("<p><small>Stop the recording before deleting this call.</small></p>" if call["status"] == "recording" else
+              f'<form method="post" action="/voice/call/{call["id"]}/delete" onsubmit="return confirm(\'Delete this call, its transcript and its audio for good?\')">'
+              '<button class="btn danger" type="submit">Delete call</button></form>')
+    body = (f'<p><a href="/voice">← All calls</a> · {CALL_STATUS.get(call["status"], call["status"])}</p>'
+            f'<div class="card"><input id="find" type="search" placeholder="Search the transcript">'
+            f'<div id="tls">{lines or "<p class=empty>Nothing said yet.</p>"}</div></div>'
+            f'<a class="btn ghost" href="/voice/call/{call["id"]}.txt">Download transcript</a> {delete}'
+            f"<script>{LOCAL_TIMES}{CALL_JS % ('true' if live else 'false')}</script>")
+    return layout("voice", user, body, label=f"🔊{html.escape(call['channel_name'])}", subtitle=utc_time(call["started_at"]))
+
+
+async def voice_call_txt(request):
+    if not voice_user(request):
+        raise web.HTTPForbidden()
+    call = db.get_call(request.app["db"], int(request.match_info["id"]))
+    if not call:
+        raise web.HTTPNotFound()
+    lines = [f"[{clock(c['start_ms'])}] {short_name(c['member_name'])}: {c['text']}"
+             for c in db.call_clips(request.app["db"], call["id"]) if c["text"]]
+    return web.Response(text="\n".join(lines) + "\n", content_type="text/plain", charset="utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="call-{call["id"]}.txt"'})
+
+
+async def voice_call_delete(request):
+    app, user = request.app, check_post(request)
+    if not voice_user(request):
+        raise web.HTTPForbidden()
+    call = db.get_call(app["db"], int(request.match_info["id"]))
+    if not call:
+        raise web.HTTPNotFound()
+    if call["status"] == "recording":
+        raise web.HTTPConflict(text="Stop the recording first.")  # the bot would keep adding clips to it
+    shutil.rmtree(app["voice_dir"] / str(call["id"]), ignore_errors=True)
+    db.delete_call(app["db"], call["id"])
+    panel_log(app, user, f"deleted voice call {call['id']} (🔊{call['channel_name']})")
+    raise web.HTTPFound("/voice")
+
+
+async def voice_clip(request):
+    """One recorded sentence. Needs the voice unlock, not just a login."""
+    if not voice_user(request):
+        raise web.HTTPForbidden()
+    clip = db.get_clip(request.app["db"], int(request.match_info["id"]))
+    base = request.app["voice_dir"].resolve()
+    path = (base / clip["file"]).resolve() if clip else None
+    if not path or not path.is_relative_to(base) or not path.is_file():
+        raise web.HTTPNotFound()
+    return web.FileResponse(path, headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox",
+                                           "Content-Type": "audio/ogg"})
 
 
 async def translate_tab(request):
@@ -498,8 +658,7 @@ async def logs_tab(request):
 <button class="btn" type="submit">Apply filters</button> <a class="btn ghost" href="/logs">Reset</a>
 <a class="btn ghost" href="/logs/export?{urlencode(kept)}">Download CSV</a>
 <label class="auto"><input type="checkbox" id="auto"> Auto-refresh every 15 s</label></form>"""
-    script = """<script>
-document.querySelectorAll('time[data-t]').forEach(t=>{t.textContent=new Date(t.dataset.t*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'medium'})});
+    script = "<script>" + LOCAL_TIMES + """
 tz.value=new Date().getTimezoneOffset();
 document.querySelectorAll('[data-all]').forEach(b=>b.onclick=()=>document.querySelectorAll('.chip input').forEach(i=>i.checked=b.dataset.all==='1'));
 let A=false;try{A=localStorage.getItem('pitstop-auto')==='1'}catch(e){}auto.checked=A;
@@ -684,6 +843,9 @@ figcaption{text-align:center;color:var(--mu);font-size:12px}
 .files{list-style:none;padding:0}.files li{margin:6px 0}.files img{display:block;max-width:320px;max-height:240px;border-radius:8px;margin-bottom:4px}
 .raw summary{color:var(--mu);cursor:pointer;font-size:12px}.pager{display:flex;justify-content:space-between;margin:14px 0}
 main.wide{max-width:none}
+#find{margin-bottom:12px}.tl{display:grid;grid-template-columns:30px 52px 150px 1fr;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)}
+.tl b{color:var(--c);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tl .tt{color:var(--mu);font-variant-numeric:tabular-nums}.tl .ib{height:26px}
+@media(max-width:820px){.tl{grid-template-columns:30px 52px 1fr}.tl>span:last-child{grid-column:2/-1}}
 @media(max-width:820px){.ev>summary{grid-template-columns:1fr auto}.ev .sm{grid-column:1/-1}.ba{grid-template-columns:1fr}}
 label.check{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--tx);cursor:pointer}label.check input{width:auto}
 input[type=color]{height:38px;padding:3px;cursor:pointer}.phs{margin:12px 0 4px;font-size:12px;color:var(--mu)}
@@ -865,6 +1027,7 @@ def make_app():
     app["secure"] = app["url"].startswith("https://")
     app["cache"] = {}  # looked up once: the bot's user id
     app["files"] = Path(os.environ.get("DB_PATH", "data/pitboss.db")).parent / "logfiles"  # saved by cogs/logs.py
+    app["voice_dir"] = VOICE_DIR  # clips saved by cogs/record.py
 
     async def start(app):
         app["http"] = aiohttp.ClientSession()
@@ -878,6 +1041,9 @@ def make_app():
     app.add_routes([web.get("/", index), web.post("/save", save), web.get("/login", login),
                     web.get("/callback", callback), web.get("/logout", logout),
                     web.post("/voice/unlock", voice_unlock), web.get("/voice/lock", voice_lock),
+                    web.post("/voice/settings", voice_settings), web.get(r"/voice/call/{id:\d+}", voice_call),
+                    web.get(r"/voice/call/{id:\d+}.txt", voice_call_txt), web.post(r"/voice/call/{id:\d+}/delete", voice_call_delete),
+                    web.get(r"/voice/clip/{id:\d+}.ogg", voice_clip),
                     web.get("/logs/export", logs_export), web.get("/logs/file/{name}", log_file),
                     web.get(r"/rolemenu/{id:new|\d+}", rolemenu_get), web.post(r"/rolemenu/{id:new|\d+}", rolemenu_save),
                     web.post(r"/rolemenu/{id:\d+}/delete", rolemenu_delete),

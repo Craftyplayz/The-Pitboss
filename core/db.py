@@ -335,6 +335,32 @@ def add_clip(conn, call_id, member_id, member_name, start_ms, duration_ms, file)
                      (call_id, member_id, member_name, start_ms, duration_ms, file))
 
 
+def voice_calls(conn, limit=100):
+    """Newest calls first, each with its speakers and how many clips still wait for text."""
+    return conn.execute(
+        "SELECT c.*, GROUP_CONCAT(DISTINCT v.member_name) AS speakers, "
+        "SUM(v.text IS NULL AND v.error IS NULL) AS pending FROM voice_calls c "
+        "LEFT JOIN voice_clips v ON v.call_id = c.id GROUP BY c.id ORDER BY c.id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def get_call(conn, call_id):
+    return conn.execute("SELECT * FROM voice_calls WHERE id = ?", (call_id,)).fetchone()
+
+
+def call_clips(conn, call_id):
+    return conn.execute("SELECT * FROM voice_clips WHERE call_id = ? ORDER BY start_ms", (call_id,)).fetchall()
+
+
+def get_clip(conn, clip_id):
+    return conn.execute("SELECT * FROM voice_clips WHERE id = ?", (clip_id,)).fetchone()
+
+
+def delete_call(conn, call_id):
+    with conn:
+        conn.execute("DELETE FROM voice_clips WHERE call_id = ?", (call_id,))
+        conn.execute("DELETE FROM voice_calls WHERE id = ?", (call_id,))
+
+
 def untranscribed_clips(conn, limit=20):
     return conn.execute("SELECT * FROM voice_clips WHERE text IS NULL AND error IS NULL ORDER BY id LIMIT ?", (limit,)).fetchall()
 
