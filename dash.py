@@ -25,7 +25,7 @@ from aiohttp import web
 from cogs.welcome import load as load_welcome
 from core import rolemenus
 from core.embeds import GOLD, LIMITS, clean as clean_embed, render as render_embed
-from core import db, dnd, markdown, review
+from core import db, dnd, importer, markdown, review
 from core.events import CATEGORIES, default_categories
 from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR, clock, short_name
 
@@ -50,24 +50,29 @@ SAFE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", 
 CALL_STATUS = {"recording": '<span class="ok">● Recording</span>', "done": "Done", "interrupted": '<span class="bad">Cut short</span> (bot restarted)'}
 SPEAKER_COLOURS = ["#5ab0f0", "#F0C35A", "#4fc98a", "#c792ea", "#f09a5a", "#5ad1c9", "#f05aa8", "#b0c45a"]
 # <time data-t> in the viewer's own time zone
+AUDIO_UPLOAD = """async function upAudio(f){const P=900000,s=$('upmsg');
+for(let o=0;o<f.size;o+=P){const r=await fetch(`/voice/call/${CALL}/audio?offset=${o}${o+P>=f.size?'&done=1':''}`,{method:'POST',body:f.slice(o,o+P)});
+ if(!r.ok){s.textContent='Upload failed: '+await r.text();return}s.textContent='Uploading… '+Math.min(100,Math.round(100*(o+P)/f.size))+'%'}
+location.reload()}"""
 LOCAL_TIMES = "document.querySelectorAll('time[data-t]').forEach(t=>{t.textContent=new Date(t.dataset.t*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'medium'})});"
 # The call player: CLIPS is [[clip id, start ms, length ms]]. Each clip is fetched and started at its place in the
 # call (Web Audio), 15 s ahead of the playhead, so overlapping speakers play together. `gen` drops clips that finish
 # loading after a pause or seek. While live or while Claude works, the page reloads unless something is playing,
-# being searched or being filled in.
+# being searched or being filled in. AUDIO (imported calls) is one recording of the whole call, played with seeking instead.
 CALL_JS = """let ctx,gain,playing=false,pos=0,anchor=0,gen=0,srcs=[],queued=new Set(),dragging=false,lit=null;
+const track=AUDIO?new Audio(AUDIO):null;if(track)track.preload='none';
 const cache=new Map(),$=id=>document.getElementById(id),lines=[...document.querySelectorAll('.ln')];
 const fmt=ms=>{let s=Math.max(0,Math.floor(ms/1000)),h=Math.floor(s/3600),m=Math.floor(s/60)%60;s%=60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
-const now=()=>playing?pos+(ctx.currentTime-anchor)*1000:pos;
+const now=()=>!playing?pos:track?track.currentTime*1000:pos+(ctx.currentTime-anchor)*1000;
 function load(id){if(!cache.has(id))cache.set(id,fetch('/voice/clip/'+id+'.ogg').then(r=>r.arrayBuffer()).then(b=>ctx.decodeAudioData(b)));return cache.get(id)}
-function queue(){const t=now(),g=gen;for(const[id,s,d]of CLIPS){
+function queue(){if(track)return;const t=now(),g=gen;for(const[id,s,d]of CLIPS){
  if(s+d<t-5000)cache.delete(id);
  if(queued.has(id)||s+d<=t||s>t+15000)continue;queued.add(id);
  load(id).then(buf=>{if(g!==gen)return;const src=ctx.createBufferSource(),at=anchor+(s-pos)/1000;src.buffer=buf;src.connect(gain);
   src.start(Math.max(at,ctx.currentTime),Math.max(0,ctx.currentTime-at));srcs.push(src)}).catch(()=>{})}}
-function play(){if(!ctx){ctx=new AudioContext();gain=ctx.createGain();gain.connect(ctx.destination)}ctx.resume();
+function play(){if(track){if(pos>=LEN)pos=0;track.currentTime=pos/1000;track.play();playing=true;return ui()}if(!ctx){ctx=new AudioContext();gain=ctx.createGain();gain.connect(ctx.destination)}ctx.resume();
  if(pos>=LEN)pos=0;anchor=ctx.currentTime;playing=true;queue();ui()}
-function pause(){pos=now();playing=false;gen++;srcs.forEach(s=>{try{s.stop()}catch(e){}});srcs=[];queued.clear();ui()}
+function pause(){pos=now();playing=false;if(track){track.pause();return ui()}gen++;srcs.forEach(s=>{try{s.stop()}catch(e){}});srcs=[];queued.clear();ui()}
 function seek(ms){const p=playing;if(p)pause();pos=Math.min(Math.max(0,ms),LEN);if(p)play();ui()}
 function ui(){const t=now();$('cur').textContent=fmt(t);$('left').textContent='-'+fmt(LEN-t);if(!dragging)$('bar').value=t;
  $('pp').textContent=playing?'❚❚':'▶';
@@ -508,9 +513,16 @@ def calls_card(app):
                 f'{rows}</table>' if rows else "<p>No calls recorded yet.</p>")
 
 
+def import_card():
+    return card("Import transcripts", '<form method="post" action="/voice/import" enctype="multipart/form-data" class="row">'
+                '<input type="file" name="files" accept=".md" multiple required aria-label="Transcript files">'
+                '<button class="btn" type="submit">Import</button></form><p><small>.md transcripts from another recording bot. '
+                'Each becomes a call here; add its recording on the call page. Claude doesn\'t review them by itself: use the button on the call page.</small></p>')
+
+
 async def voice_tab(request):
     app = request.app
-    return calls_card(app) + voice_settings_card(app, await guild_channels(app)) + f"<script>{LOCAL_TIMES}</script>"
+    return calls_card(app) + import_card() + voice_settings_card(app, await guild_channels(app)) + f"<script>{LOCAL_TIMES}</script>"
 
 
 async def voice_settings(request):
@@ -762,13 +774,18 @@ async def voice_call(request):
               f'<form method="post" action="/voice/call/{call["id"]}/delete" style="display:inline" '
               'onsubmit="return confirm(\'Delete this call, its transcript and its audio for good?\')">'
               '<button class="btn danger" type="submit">Delete call</button></form>')
+    audio_card = card("Audio", '<p>Imported without audio. Add the call\'s recording (one .ogg or other audio file of the whole '
+                      'call, starting when the transcript starts) to play it from any line.</p><input type="file" accept="audio/*" '
+                      'aria-label="Recording" onchange="this.disabled=true;upAudio(this.files[0])"><p id="upmsg"></p>'
+                      ) if call["recorder_id"] == 0 and not call["audio"] else ""
+    audio_url = json.dumps(f"/voice/call/{call['id']}/audio.ogg" if call["audio"] else None)
     faces_html = "".join(f'<img class="av mini" src="{html.escape(u)}" alt="{html.escape(names[m])}" title="{html.escape(names[m])}">'
                          for m, u in faces.items())
     subtitle = (f'{utc_time(call["started_at"])} · {clock(length_ms)} · {CALL_STATUS.get(call["status"], call["status"])}'
                 f'<span class="faces">{faces_html}</span>')
     body = (f'<div class="callbar"><a href="/voice">← All calls</a><span><a class="btn ghost" href="/voice/call/{call["id"]}.txt">'
             f'Download transcript</a> {delete}</span></div>'
-            + (summary_card(call) if call["summary"] else "") + review_card(app, call, questions, clips)
+            + audio_card + (summary_card(call) if call["summary"] else "") + review_card(app, call, questions, clips)
             + (ask_card(app, call, asks) if call["summary"] and on else "")
             + (dnd_card(call, run) if on and db.call_ready(app["db"], call["id"], review.final_model(app["db"])) else "")
             + ('<label class="check"><input type="checkbox" id="orig"> Show original text (before corrections)</label>' if fixes else "")
@@ -780,7 +797,9 @@ async def voice_call(request):
             f'<span id="cur" class="tt">0:00</span><input id="bar" type="range" min="0" max="{length_ms}" value="0" aria-label="Position">'
             f'<span id="left" class="tt">-{clock(length_ms)}</span>'
             '<label class="check"><input type="checkbox" id="follow" checked> Follow along</label></div>'
-            f"<script>const CLIPS={player_clips},LEN={length_ms},LIVE={'true' if live else 'false'};{LOCAL_TIMES}{CALL_JS}</script>")
+            f"<script>const CLIPS={player_clips},LEN={length_ms},LIVE={'true' if live else 'false'},CALL={call['id']},"
+            f"AUDIO={audio_url};"
+            f"{LOCAL_TIMES}{AUDIO_UPLOAD if audio_card else ''}{CALL_JS}</script>")
     return layout("voice", user, body, label=f"🔊{html.escape(call['channel_name'])}", subtitle=subtitle)
 
 
@@ -862,6 +881,26 @@ async def voice_ask(request):
     raise web.HTTPFound(f"/voice/call/{call['id']}#ask")
 
 
+async def voice_import(request):
+    app, user = request.app, check_post(request)
+    done, skipped, bad = [], [], []
+    for f in (await request.post()).getall("files", []):
+        if not hasattr(f, "file"):
+            continue
+        try:
+            call = importer.parse(f.file.read().decode("utf-8-sig"))
+        except (ValueError, UnicodeDecodeError) as e:
+            bad.append(f"{f.filename}: {e}")
+            continue
+        (done if db.import_call(app["db"], call) else skipped).append(f.filename)
+    if done:
+        panel_log(app, user, f"imported {len(done)} voice transcripts: {', '.join(done)[:300]}")
+    if bad or skipped or not done:
+        raise web.HTTPBadRequest(text=f"Imported {len(done)}." + "".join(f"\nAlready imported: {s}" for s in skipped)
+                                 + "".join(f"\nCouldn't read {b}" for b in bad))
+    raise web.HTTPFound("/voice")
+
+
 async def voice_dnd(request):
     """Start, answer, retry or restart the D&D summary chat; the transcriber's review thread does Claude's turns."""
     app, user, call = posted_call(request)
@@ -886,6 +925,48 @@ async def voice_dnd(request):
         raise web.HTTPBadRequest(text="Can't do that now")
     panel_log(app, user, f"{what} on voice call {call['id']}")
     raise web.HTTPFound(f"/voice/call/{call['id']}#dnd")
+
+
+async def voice_audio_upload(request):
+    """One piece of an imported call's recording, appended in order; the last piece checks it's audio and keeps it."""
+    app, user, call = posted_call(request)
+    if call["recorder_id"] != 0 or call["audio"]:
+        raise web.HTTPBadRequest(text="Only imported calls without audio take a recording")
+    folder = app["voice_dir"] / str(call["id"])
+    folder.mkdir(parents=True, exist_ok=True)
+    part, offset = folder / "call.part", int(request.query.get("offset", "-1"))
+    have = part.stat().st_size if part.exists() and offset else 0
+    if offset != have:
+        raise web.HTTPConflict(text=f"Expected offset {have}")
+    with open(part, "wb" if offset == 0 else "ab") as f:
+        f.write(await request.read())
+    if "done" not in request.query:
+        return web.Response(text="ok")
+    try:
+        import av  # here, like the transcriber: only this request needs it
+        with av.open(str(part)) as f:
+            if not f.streams.audio or not f.duration:
+                raise ValueError("no audio in it")
+    except Exception as e:
+        part.unlink()
+        raise web.HTTPBadRequest(text=f"Not an audio file: {e}")
+    part.replace(folder / "call.ogg")
+    db.update_call(app["db"], call["id"], audio=f"{call['id']}/call.ogg")
+    panel_log(app, user, f"added audio to imported voice call {call['id']} ({part.with_suffix('.ogg').stat().st_size // 2 ** 20} MB)")
+    return web.Response(text="ok")
+
+
+async def voice_call_audio(request):
+    """An imported call's whole recording. FileResponse answers range requests, so the player can seek."""
+    if not session(request):
+        raise web.HTTPForbidden()
+    call = db.get_call(request.app["db"], int(request.match_info["id"]))
+    base = request.app["voice_dir"].resolve()
+    path = (base / call["audio"]).resolve() if call and call["audio"] else None
+    if not path or not path.is_relative_to(base) or not path.is_file():
+        raise web.HTTPNotFound()
+    return web.FileResponse(path, headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox",
+                                           "Content-Type": "audio/ogg"})
 
 
 async def voice_clip(request):
@@ -1353,7 +1434,7 @@ def make_app():
     # docker compose passes an unset variable as "", and an empty secret would make session cookies forgeable
     if missing := [k for k in ("DISCORD_TOKEN", "GUILD_ID", "DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET") if not os.environ.get(k)]:
         raise SystemExit(f"dash: set {', '.join(missing)} (client ID and secret are in Developer Portal > your app > OAuth2)")
-    app = web.Application()
+    app = web.Application(client_max_size=50 * 2 ** 20)  # transcript imports: a 5-hour call is about 300 KB
     app["db"] = db.connect(os.environ.get("DB_PATH", "data/pitboss.db"))
     app["token"], app["guild_id"] = os.environ["DISCORD_TOKEN"], int(os.environ["GUILD_ID"])
     app["client_id"] = os.environ["DISCORD_CLIENT_ID"]
@@ -1380,6 +1461,8 @@ def make_app():
                     web.get(r"/voice/clip/{id:\d+}.ogg", voice_clip), web.post(r"/voice/call/{id:\d+}/answer", voice_answer),
                     web.post(r"/voice/call/{id:\d+}/rerun", voice_rerun), web.post(r"/voice/call/{id:\d+}/ask", voice_ask),
                     web.post(r"/voice/call/{id:\d+}/dnd", voice_dnd),
+                    web.post("/voice/import", voice_import), web.post(r"/voice/call/{id:\d+}/audio", voice_audio_upload),
+                    web.get(r"/voice/call/{id:\d+}/audio.ogg", voice_call_audio),
                     web.get("/logs/export", logs_export), web.get("/logs/file/{name}", log_file),
                     web.get(r"/rolemenu/{id:new|\d+}", rolemenu_get), web.post(r"/rolemenu/{id:new|\d+}", rolemenu_save),
                     web.post(r"/rolemenu/{id:\d+}/delete", rolemenu_delete),

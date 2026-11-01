@@ -254,6 +254,59 @@ class ClaudeReview(VoiceCall):
         logs = [r["summary"] for r in self.db.execute("SELECT summary FROM events WHERE kind = 'panel_change'")]
         self.assertIn("Crafty started a D&D summary (curse) on voice call 1", logs)
 
+    async def test_import(self):
+        from aiohttp import FormData
+        from test_importer import SAMPLE
+
+        def files(*named):
+            form = FormData()
+            for name, text in named:
+                form.add_field("files", text.encode(), filename=name, content_type="text/markdown")
+            return form
+        self.assertIn("Import transcripts", await (await self.client.get("/voice")).text())
+        r = await self.client.post("/voice/import", data=files(("a.md", SAMPLE)), headers=self.ORIGIN, allow_redirects=False)
+        self.assertEqual(r.status, 302)
+        self.assertIn("Raygun", await (await self.client.get("/voice")).text())
+        r = await self.client.post("/voice/import", data=files(("a.md", SAMPLE), ("b.md", "hello")), headers=self.ORIGIN)
+        self.assertEqual(r.status, 400)
+        self.assertEqual(await r.text(), "Imported 0.\nAlready imported: a.md\nCouldn't read b.md: no **Date** line")
+        logs = [r["summary"] for r in self.db.execute("SELECT summary FROM events WHERE kind = 'panel_change'")]
+        self.assertIn("Crafty imported 1 voice transcripts: a.md", logs)
+
+    async def test_imported_audio(self):
+        import av
+        import numpy as np
+        from test_importer import SAMPLE
+
+        call = db.import_call(self.db, dash.importer.parse(SAMPLE))
+        ogg = Path(self.dir.name) / "tone.ogg"
+        with av.open(str(ogg), "w") as out:  # 2 s of tone, a stand-in for a call's recording
+            s = out.add_stream("libopus", rate=48000, layout="mono")
+            frame = av.AudioFrame.from_ndarray((np.sin(np.arange(96000) / 10) * 9000).astype(np.int16)[None], format="s16", layout="mono")
+            frame.rate = 48000
+            for packet in [*s.encode(frame), *s.encode(None)]:
+                out.mux(packet)
+        data, url = ogg.read_bytes(), f"/voice/call/{call}/audio"
+
+        async def up(offset, piece, done=False):
+            return await self.client.post(f"{url}?offset={offset}{'&done=1' if done else ''}", data=piece, headers=self.ORIGIN)
+        page = await (await self.client.get(f"/voice/call/{call}")).text()
+        self.assertIn("Imported without audio", page)
+        self.assertIn("AUDIO=null", page)
+        self.assertEqual((await up(0, b"OggS junk", True)).status, 400)  # not audio: thrown away
+        self.assertFalse((Path(self.dir.name) / str(call) / "call.part").exists())
+        half = len(data) // 2
+        self.assertEqual((await up(0, data[:half])).status, 200)
+        self.assertEqual((await up(5, data[half:])).status, 409)  # a piece out of order
+        self.assertEqual((await up(half, data[half:], True)).status, 200)
+        page = await (await self.client.get(f"/voice/call/{call}")).text()
+        self.assertIn(f'AUDIO="/voice/call/{call}/audio.ogg"', page)
+        self.assertNotIn("Imported without audio", page)
+        r = await self.client.get(f"{url}.ogg", headers={"Range": "bytes=10-19"})
+        self.assertEqual((r.status, await r.read()), (206, data[10:20]))  # seekable
+        self.assertEqual((await up(0, data, True)).status, 400)  # only once
+        self.assertEqual((await self.client.post(f"/voice/call/{self.call}/audio?offset=0&done=1", data=data, headers=self.ORIGIN)).status, 400)
+
     async def test_glossary_setting(self):
         await self.client.post("/voice/settings", data={"model": "small.en", "glossary": " Veyra (heard as Vera) "}, headers=self.ORIGIN)
         self.assertEqual(db.get_setting(self.db, "voice_glossary"), "Veyra (heard as Vera)")

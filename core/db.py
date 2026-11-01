@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS voice_calls (
     -- for answers), summarise, done, failed, old (recorded before reviews existed) or short (too little said)
     review_status TEXT,
     review_error  TEXT,
-    summary       TEXT              -- JSON from core/review.py
+    summary       TEXT,             -- JSON from core/review.py
+    audio         TEXT              -- imported calls: the whole call's recording, relative to the voice folder
 );
 CREATE TABLE IF NOT EXISTS voice_clips (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,7 +148,7 @@ def connect(path):
     conn.executescript(SCHEMA)
     # databases made before these columns existed
     for table, column in (("voice_clips", "model"), ("voice_calls", "review_status"), ("voice_calls", "review_error"),
-                          ("voice_calls", "summary")):
+                          ("voice_calls", "summary"), ("voice_calls", "audio")):
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
         except sqlite3.OperationalError:
@@ -414,6 +415,19 @@ def call_joins(conn, call):
         if call["channel_name"] in (before, after) and before != after and r["user_id"] != call["recorder_id"]:
             out.append((r["at"], r["user_id"], r["user_name"], after == call["channel_name"]))
     return out
+
+
+def import_call(conn, call):
+    """Store a parsed transcript (core/importer.py) as a done call with no audio. None if it's already there."""
+    if conn.execute("SELECT 1 FROM voice_calls WHERE channel_name = ? AND started_at = ?", (call["channel"], call["started_at"])).fetchone():
+        return None
+    with conn:
+        # recorder 0: no bot recorded it. 'old': Claude only reviews it from the call page's button
+        call_id = conn.execute("INSERT INTO voice_calls (recorder_id, channel_id, channel_name, started_at, ended_at, status, review_status) "
+                               "VALUES (0, 0, ?, ?, ?, 'done', 'old')", (call["channel"], call["started_at"], call["ended_at"])).lastrowid
+        conn.executemany("INSERT INTO voice_clips (call_id, member_id, member_name, start_ms, duration_ms, file, text) VALUES (?, ?, ?, ?, ?, '', ?)",
+                         [(call_id, member_id, name, ms, dur, text) for member_id, name, ms, dur, text in call["lines"]])
+    return call_id
 
 
 def get_clip(conn, clip_id):
