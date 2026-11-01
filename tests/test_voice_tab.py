@@ -254,6 +254,29 @@ class ClaudeReview(VoiceCall):
         logs = [r["summary"] for r in self.db.execute("SELECT summary FROM events WHERE kind = 'panel_change'")]
         self.assertIn("Crafty started a D&D summary (curse) on voice call 1", logs)
 
+    async def test_dnd_question_boxes(self):
+        from test_dnd import ASKED
+
+        db.save_transcript(self.db, 4, text="bye")
+        db.start_dnd(self.db, self.call, "curse")
+        run = db.call_dnd(self.db, self.call)
+        msgs = [{"role": "user", "content": []},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "a1", "name": "ask_questions", "input": ASKED}]}]
+        db.update_dnd(self.db, run["id"], status="you", messages=json.dumps(msgs))
+        page = await self.page()
+        self.assertIn("<p><b>Raygun</b>: Glory, played by Tom.</p>", page)  # the cast stays in the chat
+        self.assertIn('<input type="radio" name="n0" value="0" checked> Valen <small>(best guess)</small>', page)
+        self.assertIn('<input type="radio" name="q0" value="0"> Vera <small>(best guess)</small>', page)  # questions aren't preselected
+        self.assertIn('data-seek="4094000">[1:08:14]</button> <i>I throw it!</i>', page)
+        self.assertIn('name="q1o"', page)  # Other, even without options
+        await self.post("dnd", {"action": "answer", "n0": "1", "q0": "other", "q0o": " Holdar ", "q1": "other", "note": "done with questions"})
+        run = db.call_dnd(self.db, self.call)
+        result = json.loads(run["messages"])[-1]["content"][0]
+        self.assertEqual((run["status"], result["type"], result["tool_use_id"]), ("claude", "tool_result", "a1"))
+        self.assertEqual(result["content"], "Names:\n- Valen (PC): Velen\n\nQuestions:\n1. Who threw the javelin?: Other: Holdar\n"
+                                            "2. Was the duel real?: (skipped)\n\nAlso: done with questions")
+        self.assertIn("<summary>Your answers</summary>", await self.page())
+
     async def test_import(self):
         from aiohttp import FormData
         from test_importer import SAMPLE

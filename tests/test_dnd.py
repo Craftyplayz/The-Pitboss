@@ -31,6 +31,12 @@ def saving(filename, content="---\nsession: 01\n---\n## Players"):
             {"type": "tool_use", "id": "t1", "name": "save_session_file", "input": {"filename": filename, "content": content}}]
 
 
+ASKED = {"cast": "**Raygun**: Glory, played by Tom.",
+         "names": [{"spelling": "Valen", "variants": ["Velen"], "what": "PC", "confidence": "high", "options": ["Valen", "Velen"]}],
+         "questions": [{"question": "Who threw the javelin?", "quote": "I throw it!", "time": "1:08:14", "options": ["Vera", "Leon"]},
+                       {"question": "Was the duel real?", "quote": "", "time": "", "options": []}]}
+
+
 class Files(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
@@ -97,7 +103,8 @@ class Turns(unittest.TestCase):
         self.assertEqual((run["status"], run["filename"], run["memory"]), ("you", "session-01-2025-10-29.md", None))
         self.assertEqual(run["sent"], "35 characters in 1 part, last timestamp 0:00")
         sent = client.beta.messages.stream.call_args.kwargs
-        self.assertEqual((sent["system"], sent["tools"], sent["cache_control"]["ttl"]), (dnd.SYSTEM, [dnd.TOOL], "1h"))
+        self.assertEqual((sent["system"], sent["tools"], sent["cache_control"]["ttl"]), (dnd.SYSTEM, [dnd.TOOL, dnd.ASK], "1h"))
+        self.assertTrue(dnd.SYSTEM.startswith("You summarise D&D sessions") and "## How to ask on this page" in dnd.SYSTEM)
         self.assertIn("I attack the bandit.", json.dumps(sent["messages"][0]))
         self.assertFalse(review.step(self.conn, client))  # waits for the admin
 
@@ -119,6 +126,15 @@ class Turns(unittest.TestCase):
         run = self.run_()
         self.assertEqual((run["memory"], run["filename"]), ("session-01-2025-10-29.md", "session-02-2025-10-29.md"))
         self.assertIn('<memory file="session-01-2025-10-29.md">', json.loads(run["messages"])[0]["content"][0]["text"])
+
+    def test_questions_wait_for_the_form(self):
+        ask = {"type": "tool_use", "id": "a1", "name": "ask_questions", "input": ASKED}
+        client = fake_client([ask])
+        review.step(self.conn, client)
+        run = self.run_()
+        self.assertEqual((run["status"], client.beta.messages.stream.call_count), ("you", 1))  # not answered by itself
+        self.assertEqual(dnd.pending(json.loads(run["messages"]))["input"], ASKED)
+        self.assertIn("N1. Valen (PC, high; heard as Velen): Valen / Velen", dnd.questions_text(ask))
 
     def test_failure_keeps_the_chat(self):
         client = mock.MagicMock()

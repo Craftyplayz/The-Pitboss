@@ -597,12 +597,19 @@ def transcript_line(c, fixes=()):
 STAMP = re.compile(r"\[(\d+(?::\d\d){1,2})\]")
 
 
+def seek_button(m):
+    h, mi, s = ([0] + [int(p) for p in m[1].split(":")])[-3:]
+    return f'<button type="button" class="tt" data-seek="{(h * 3600 + mi * 60 + s) * 1000}">[{m[1]}]</button>'
+
+
 def stamps(text):
     """Escaped text where each [1:18:08] is a button that jumps the player there."""
-    def seek(m):
-        h, mi, s = ([0] + [int(p) for p in m[1].split(":")])[-3:]
-        return f'<button type="button" class="tt" data-seek="{(h * 3600 + mi * 60 + s) * 1000}">[{m[1]}]</button>'
-    return STAMP.sub(seek, html.escape(text)).replace("\n", "<br>")
+    return STAMP.sub(seek_button, html.escape(text)).replace("\n", "<br>")
+
+
+def md(text):
+    """Claude's markdown as HTML, with [1:18:08] times as player buttons too."""
+    return STAMP.sub(seek_button, markdown.render(text))
 
 
 def summary_card(call):
@@ -680,6 +687,34 @@ def ask_card(app, call, asks):
     return f'<div class="card" id="ask"><h2>Ask about this call</h2>{form}{shown}</div>'
 
 
+def ask_form(cid, ask):
+    """Claude's questions as boxes: its options (best guess first) and an Other answer, plus notes for anything else."""
+    e = html.escape
+
+    def box(name, title, sub, options, picked):
+        opts = "".join(f'<label class="check"><input type="radio" name="{name}" value="{k}"{" checked" if picked and k == 0 else ""}> '
+                       f'{e(o)}{" <small>(best guess)</small>" if k == 0 else ""}</label>' for k, o in enumerate(options))
+        return (f'<fieldset class="qbox"><legend>{title}</legend>{sub}{opts}<label class="check"><input type="radio" name="{name}" '
+                f'value="other"> Other: <input name="{name}o" maxlength="300" aria-label="Other answer" '
+                f'onfocus="this.closest(\'label\').querySelector(\'[type=radio]\').checked=true"></label></fieldset>')
+    names = "".join(box(f"n{i}", f"<b>{e(n['spelling'])}</b>",
+                        f'<p><small>{e(n["what"])} · {e(n["confidence"])} confidence'
+                        + (f' · heard as {e(", ".join(n["variants"]))}' if n["variants"] else "") + "</small></p>",
+                        n["options"], True) for i, n in enumerate(ask.get("names", [])))
+    def where(q):  # the time links to the player
+        time = stamps("[" + q["time"].strip("[]") + "]") + " " if q["time"] else ""
+        return f'<p><small>{time}<i>{e(q["quote"])}</i></small></p>' if time or q["quote"] else ""
+    questions = "".join(box(f"q{i}", f"{i + 1}. {e(q['question'])}", where(q), q["options"], False)
+                        for i, q in enumerate(ask.get("questions", [])))
+    return (f'<form method="post" action="/voice/call/{cid}/dnd" class="keep"><input type="hidden" name="action" value="answer">'
+            + (f'<h3>Names</h3><p><small>Claude\'s best spelling is picked: change only the wrong ones.</small></p><div class="qgrid">{names}</div>'
+               if names else "")
+            + (f'<h3>Questions</h3><div class="qgrid">{questions}</div>' if questions else "")
+            + '<h3>Anything else</h3><textarea name="note" maxlength="5000" aria-label="Anything else" '
+              'placeholder="Corrections Claude didn\'t ask about, or: done with questions"></textarea>'
+              '<button class="btn" type="submit">Send answers</button></form>')
+
+
 def dnd_card(call, run):
     """Claude's D&D session summary: a chat with its questions, then the summary and the saved memory file."""
     e, cid = html.escape, call["id"]
@@ -698,14 +733,26 @@ def dnd_card(call, run):
         return f'<div class="card" id="dnd"><h2>D&amp;D session summary</h2>{body}</div>'
     body = f'<p><small>Campaign <b>{e(run["campaign"])}</b> · memory: {e(run["memory"] or "none (first session)")}'
     body += f' · sent {e(run["sent"])}</small></p>' if run["sent"] else "</small></p>"
-    for m in json.loads(run["messages"])[1:]:  # the first is the transcript itself
-        if isinstance(m["content"], str):
-            body += f'<div class="ask"><p class="aq">You</p><p>{e(m["content"]).replace(chr(10), "<br>")}</p></div>'
-        elif m["role"] == "assistant" and (text := dnd.text_of(m["content"])):
-            body += f'<div class="ask md"><p class="aq">Claude</p>{markdown.render(text)}</div>'
+    msgs = json.loads(run["messages"])
+    ask = dnd.pending(msgs) if run["status"] == "you" else None
+    for m in msgs[1:]:  # the first is the transcript itself
+        if m["role"] == "user":
+            said = m["content"] if isinstance(m["content"], str) else "\n".join(
+                str(b["content"]) for b in m["content"] if b["type"] == "tool_result" and not b.get("is_error"))
+            if said:
+                body += f'<details class="ask"><summary>Your answers</summary><p>{stamps(said)}</p></details>'
+            continue
+        text = dnd.text_of(m["content"])
+        asked = next((b["input"] for b in m["content"] if b["type"] == "tool_use" and b["name"] == dnd.ASK["name"]), None)
+        if asked:
+            text = (text + "\n\n" if text else "") + asked.get("cast", "")
+        if text:
+            body += f'<div class="ask md"><p class="aq">Claude</p>{md(text)}</div>'
     status = run["status"]
     if status == "claude":
         body += "<p><i class=wait>Claude is reading and thinking… this can take a few minutes.</i></p>"
+    elif ask:
+        body += ask_form(cid, ask["input"])
     elif status == "you":
         body += (f'<form method="post" action="/voice/call/{cid}/dnd" class="keep"><input type="hidden" name="action" value="reply">'
                  '<textarea name="text" maxlength="20000" required aria-label="Your answers" '
@@ -917,6 +964,20 @@ async def voice_dnd(request):
     elif action == "reply" and run and run["status"] == "you" and 0 < len(text := posted.get("text", "").strip()) <= 20000:
         db.update_dnd(app["db"], run["id"], status="claude",
                       messages=json.dumps(json.loads(run["messages"]) + [{"role": "user", "content": text}]))
+        what = "answered Claude's D&D summary questions"
+    elif action == "answer" and run and run["status"] == "you" and (ask := dnd.pending(json.loads(run["messages"]))):
+        def pick(name, options):
+            v = posted.get(name, "")
+            if v == "other":
+                return f"Other: {own}" if (own := posted.get(name + "o", "").strip()[:300]) else "(skipped)"
+            return options[int(v)] if v.isdigit() and int(v) < len(options) else "(skipped)"
+        a = ask["input"]
+        lines = ["Names:"] + [f"- {n['spelling']} ({n['what']}): {pick(f'n{i}', n['options'])}" for i, n in enumerate(a.get("names", []))]
+        lines += ["", "Questions:"] + [f"{i + 1}. {q['question']}: {pick(f'q{i}', q['options'])}" for i, q in enumerate(a.get("questions", []))]
+        if note := posted.get("note", "").strip()[:5000]:
+            lines += ["", f"Also: {note}"]
+        result = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": ask["id"], "content": "\n".join(lines)}]}
+        db.update_dnd(app["db"], run["id"], status="claude", messages=json.dumps(json.loads(run["messages"]) + [result]))
         what = "answered Claude's D&D summary questions"
     elif action == "retry" and run and run["status"] == "failed":
         db.update_dnd(app["db"], run["id"], status="claude", error=None)
@@ -1276,7 +1337,9 @@ main.wide{max-width:none}
 .q input[name^=own]{width:auto;flex:1;padding:5px 8px}.ask{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
 .aq{font-weight:600;margin-bottom:4px}.ask .wait{color:var(--mu)}
 .md h2,.md h3,.md h4{margin:12px 0 4px}.md table{border-collapse:collapse;margin:6px 0}.md th,.md td{border:1px solid var(--line);padding:4px 8px;text-align:left}
-.tw{overflow-x:auto}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row input,.row select{width:auto;flex:1}
+.tw{overflow-x:auto}.qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+.qbox{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:0;min-width:0}.qbox legend{padding:0 4px}
+.qbox p{margin:2px 0 6px}.qbox label.check{margin:4px 0}.qbox input[name$=o]{width:auto;flex:1;padding:4px 8px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row input,.row select{width:auto;flex:1}
 .jl{font-size:12px;font-style:italic;color:var(--mu);padding:8px 0 8px 54px;border-bottom:1px solid var(--line)}
 #player{position:sticky;bottom:12px;margin-top:16px;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
 border-radius:var(--r);padding:10px 16px;box-shadow:0 8px 28px rgba(0,0,0,.45)}#player #bar{flex:1;width:auto;min-width:60px;accent-color:var(--gold)}

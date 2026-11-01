@@ -21,7 +21,7 @@ PART = 150_000  # characters per transcript part; the whole transcript still goe
 CACHE = {"type": "ephemeral", "ttl": "1h"}  # the transcript is resent every turn and answers come minutes apart
 STAMP = re.compile(r"\d+:\d\d(?::\d\d)?(?: ?[AP]M)?")
 
-SYSTEM = """You summarise D&D sessions from Discord speech-to-text transcripts. Expect transcription errors, especially in names, places, spells and invented fantasy words.
+PROMPT = """You summarise D&D sessions from Discord speech-to-text transcripts. Expect transcription errors, especially in names, places, spells and invented fantasy words.
 
 ## Memory
 You may be given the latest file from the sessions/ folder. It is cumulative: cast, shared-account notes, name glossary, NPCs, places, plot threads and the user's preferences.
@@ -107,12 +107,64 @@ previous_file: <filename or none>
 (things to check next time instead of asking from scratch)
 
 Keep private or secret topics out of the file, apart from a note in Preferences that they exist and must be left out."""
+# how questions reach the user on the call page; this overrides how Phase 3 says to lay them out
+ASKING = """
+
+## How to ask on this page
+I answer in a form, not a chat box. Whenever you have questions (Phase 3 and every follow-up batch), call ask_questions instead \
+of writing them as text, and write nothing else in that reply:
+- cast: Phase 1 as a short markdown summary of who is in the campaign: each Discord account, who uses it and their \
+character, plus a line on how you split shared accounts. A few lines or a small table, without the evidence.
+- names: one entry per name from the Phase 2 table that memory hasn't confirmed, High confidence included. Its options are \
+possible spellings, most likely first.
+- questions: the Phase 3 questions, up to 10 per batch. Each has a short quote and its options: your best guess first, then \
+any other likely answers. The form always adds an "Other" box, so never add one. When a question is about something that \
+happened, give the time of the line exactly as the transcript writes it, like 1:08:14, so I can jump there and listen.
+In any text you write, put transcript times in square brackets, like [1:08:14]: the page turns them into links to that moment.
+My answers come back as the tool result. Ask follow-ups the same way, or go on to Phase 4 and 5 when nothing is left."""
+SYSTEM = PROMPT + ASKING
 
 TOOL = {"name": "save_session_file", "eager_input_streaming": True,
         "description": "Save the cumulative memory file (Phase 5) into the campaign's sessions folder. Call it once, right "
                        "after the summary, with the exact filename you were given.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["filename", "content"],
                          "properties": {"filename": {"type": "string"}, "content": {"type": "string", "description": "The whole markdown file"}}}}
+
+
+OPTIONS = {"type": "array", "items": {"type": "string"}}
+ASK = {"name": "ask_questions", "strict": True,
+       "description": "Show the user the cast and your questions as a form. Their answers come back as this tool's result.",
+       "input_schema": {"type": "object", "additionalProperties": False, "required": ["cast", "names", "questions"], "properties": {
+           "cast": {"type": "string", "description": "Short markdown summary of who is in the campaign (Phase 1)"},
+           "names": {"type": "array", "items": {
+               "type": "object", "additionalProperties": False, "required": ["spelling", "variants", "what", "confidence", "options"],
+               "properties": {"spelling": {"type": "string", "description": "Most likely spelling"}, "variants": OPTIONS,
+                              "what": {"type": "string", "description": "PC, NPC, place, item, faction or spell, and who or what it is"},
+                              "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                              "options": {**OPTIONS, "description": "Spellings to pick from, most likely first"}}}},
+           "questions": {"type": "array", "items": {
+               "type": "object", "additionalProperties": False, "required": ["question", "quote", "time", "options"],
+               "properties": {"question": {"type": "string"}, "quote": {"type": "string", "description": "Short quote, or empty"},
+                              "time": {"type": "string", "description": "Transcript time like 1:08:14, or empty"},
+                              "options": {**OPTIONS, "description": "Your best guess first, then other likely answers"}}}}}}}
+
+
+def pending(messages):
+    """The ask_questions call waiting for answers, or None."""
+    last = messages[-1] if messages else None
+    if last and last["role"] == "assistant":
+        return next((b for b in last["content"] if b["type"] == "tool_use" and b["name"] == ASK["name"]), None)
+
+
+def questions_text(ask):
+    """An ask_questions call as plain text, for the terminal."""
+    a = ask["input"]
+    out = [a.get("cast", ""), "", "Names:"]
+    out += [f"  N{i}. {n['spelling']} ({n['what']}, {n['confidence']}; heard as {', '.join(n['variants'])}): {' / '.join(n['options'])}"
+            for i, n in enumerate(a.get("names", []), 1)]
+    out += ["", "Questions:"] + [f"  {i}. {q['question']} [{q['time']}] \"{q['quote']}\" Options: {' / '.join(q['options'])}"
+                                 for i, q in enumerate(a.get("questions", []), 1)]
+    return "\n".join(out)
 
 
 def campaigns():
@@ -177,7 +229,7 @@ def talk(client, messages, folder, filename):
     """Claude's next reply, tool calls included; appends to `messages`. (saved path or None, summary or None)."""
     saved = summary = None
     while True:
-        with client.beta.messages.stream(model=MODEL, max_tokens=64000, system=SYSTEM, messages=messages, tools=[TOOL],
+        with client.beta.messages.stream(model=MODEL, max_tokens=64000, system=SYSTEM, messages=messages, tools=[TOOL, ASK],
                                          output_config={"effort": "high"}, cache_control=CACHE, betas=BETAS,
                                          fallbacks="default") as stream:
             msg = stream.get_final_message()
@@ -190,7 +242,7 @@ def talk(client, messages, folder, filename):
         content = [b.to_dict() for b in msg.content]  # every block goes back unchanged, thinking included
         messages.append({"role": "assistant", "content": content})
         uses = [b for b in content if b["type"] == "tool_use"]
-        if not uses:
+        if not uses or pending(messages):  # questions wait for the user's answers
             return saved, summary
         results = []
         for b in uses:
@@ -235,14 +287,16 @@ def main(path, campaign, day_=None):
         if saved:
             print(f"{summary}\n\nSaved {saved}")
             return
-        print("\n" + text_of(messages[-1]["content"]) + "\n")
+        ask = pending(messages)
+        print("\n" + (questions_text(ask) if ask else text_of(messages[-1]["content"])) + "\n")
         reply = input("You (blank line ends, 'quit' stops):\n")
         lines = [reply]
         while lines[-1]:
             lines.append(input())
         if reply.strip() == "quit":
             return
-        messages.append({"role": "user", "content": "\n".join(lines).strip()})
+        reply = "\n".join(lines).strip()
+        messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": ask["id"], "content": reply}] if ask else reply})
 
 
 if __name__ == "__main__":
