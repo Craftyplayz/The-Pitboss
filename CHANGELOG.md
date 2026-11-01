@@ -2,6 +2,10 @@
 
 Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 is the first version on the new server. Each version has a git tag, `v<version>`. From 1.4.1 on every change gets its own version (see CLAUDE.md), and the bot posts the newest entries after it restarts.
 
+### Unreleased
+
+- Updated the bot's Discord library to the newest version, which supports Discord's new encrypted voice calls.
+
 ## 1.8.0
 
 - Role menus: pick your own roles by clicking a button, choosing from a dropdown or reacting with an emoji. Click again to drop a role.
