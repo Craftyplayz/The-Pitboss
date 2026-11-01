@@ -31,7 +31,6 @@ from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR
 PORT = int(os.environ.get("DASH_PORT", 8643))
 DISCORD = "https://discord.com/api/v10"
 SESSION_TTL = 12 * 3600
-VOICE_TTL = 3600  # the voice tab locks again after an hour
 ADMINISTRATOR, MANAGE_GUILD = 1 << 3, 1 << 5
 TEXT, VOICE, FORUM = (0, 5), (2,), (15,)  # Discord channel types; 5 is an announcement channel
 # (setting key, label, allowed channel types). The scrim log stays in /setup: picking it changes channel permissions.
@@ -403,13 +402,6 @@ async def games_tab(request):
     return soon("Daily Wordle", "Marriages", "Giveaways")
 
 
-def voice_user(request):
-    """The logged-in user, if they unlocked the Voice tab in the last hour."""
-    user = session(request)
-    unlocked = unsign(request.cookies.get("voice"), request.app["secret"])
-    return user if user and unlocked and unlocked["id"] == user["id"] else None
-
-
 def clock(ms):
     s = ms // 1000
     return f"{s // 3600}:{s // 60 % 60:02}:{s % 60:02}" if s >= 3600 else f"{s // 60}:{s % 60:02}"
@@ -457,22 +449,12 @@ def calls_card(app):
 
 async def voice_tab(request):
     app = request.app
-    if not app["voice_password"]:
-        return card("Locked", "<p>Set <code>VOICE_PASSWORD</code> on the dash container to turn this tab on.</p>")
-    if not voice_user(request):
-        wrong = '<p class="bad">Wrong password.</p>' if "wrong" in request.query else ""
-        return card("Password needed", f'{wrong}<p>Voice transcripts and recordings need a second password.</p>'
-                    '<form method="post" action="/voice/unlock"><label for="pw">Password</label>'
-                    '<input id="pw" name="password" type="password" autocomplete="current-password" required>'
-                    '<button class="btn" type="submit">Unlock</button></form>')
     return (calls_card(app) + voice_settings_card(app, await guild_channels(app)) + soon("AI summaries of each call")
-            + '<p><small>Unlocked for an hour. <a href="/voice/lock">Lock now</a></small></p>' + f"<script>{LOCAL_TIMES}</script>")
+            + f"<script>{LOCAL_TIMES}</script>")
 
 
 async def voice_settings(request):
     app, user = request.app, check_post(request)
-    if not voice_user(request):
-        raise web.HTTPForbidden()
     posted = await request.post()
     names = {c["id"]: c["name"] for c in await guild_channels(app) if c["type"] in VOICE}
     picked = sorted(int(v) for v in posted.getall("autojoin", []) if v in names)
@@ -501,9 +483,9 @@ def transcript_line(clip, colour):
 
 
 async def voice_call(request):
-    app, user = request.app, voice_user(request)
+    app, user = request.app, session(request)
     if not user:
-        raise web.HTTPFound("/voice")
+        raise web.HTTPFound("/voice")  # shows the login
     call = db.get_call(app["db"], int(request.match_info["id"]))
     if not call:
         raise web.HTTPNotFound()
@@ -525,7 +507,7 @@ async def voice_call(request):
 
 
 async def voice_call_txt(request):
-    if not voice_user(request):
+    if not session(request):
         raise web.HTTPForbidden()
     call = db.get_call(request.app["db"], int(request.match_info["id"]))
     if not call:
@@ -538,8 +520,6 @@ async def voice_call_txt(request):
 
 async def voice_call_delete(request):
     app, user = request.app, check_post(request)
-    if not voice_user(request):
-        raise web.HTTPForbidden()
     call = db.get_call(app["db"], int(request.match_info["id"]))
     if not call:
         raise web.HTTPNotFound()
@@ -552,8 +532,8 @@ async def voice_call_delete(request):
 
 
 async def voice_clip(request):
-    """One recorded sentence. Needs the voice unlock, not just a login."""
-    if not voice_user(request):
+    """One recorded sentence."""
+    if not session(request):
         raise web.HTTPForbidden()
     clip = db.get_clip(request.app["db"], int(request.match_info["id"]))
     base = request.app["voice_dir"].resolve()
@@ -953,25 +933,6 @@ async def save(request):
     raise web.HTTPFound(f"/{tab}?saved")
 
 
-async def voice_unlock(request):
-    app, user = request.app, check_post(request)
-    password = (await request.post()).get("password", "")
-    if not app["voice_password"] or not hmac.compare_digest(password.encode(), app["voice_password"].encode()):
-        panel_log(app, user, "typed a wrong Voice tab password")
-        raise web.HTTPFound("/voice?wrong")
-    panel_log(app, user, "unlocked the Voice tab")
-    response = web.HTTPFound("/voice")
-    response.set_cookie("voice", sign({"id": user["id"], "exp": time.time() + VOICE_TTL}, app["secret"]),
-                        max_age=VOICE_TTL, httponly=True, secure=app["secure"], samesite="Lax")
-    raise response
-
-
-async def voice_lock(request):
-    response = web.HTTPFound("/voice")
-    response.del_cookie("voice")
-    raise response
-
-
 async def login(request):
     app, state = request.app, secrets.token_urlsafe(16)
     query = {"client_id": app["client_id"], "redirect_uri": app["url"] + "/callback", "response_type": "code",
@@ -1009,7 +970,6 @@ async def callback(request):
 async def logout(request):
     response = web.HTTPFound("/")
     response.del_cookie("session")
-    response.del_cookie("voice")
     raise response
 
 
@@ -1022,7 +982,6 @@ def make_app():
     app["token"], app["guild_id"] = os.environ["DISCORD_TOKEN"], int(os.environ["GUILD_ID"])
     app["client_id"] = os.environ["DISCORD_CLIENT_ID"]
     app["secret"] = os.environ["DISCORD_CLIENT_SECRET"]  # also signs the session cookie
-    app["voice_password"] = os.environ.get("VOICE_PASSWORD", "")  # empty keeps the voice tab locked for everyone
     app["url"] = os.environ.get("DASH_URL", "https://pitstop.craftyplayz.com").rstrip("/")
     app["secure"] = app["url"].startswith("https://")
     app["cache"] = {}  # looked up once: the bot's user id
@@ -1040,7 +999,6 @@ def make_app():
     # fixed routes first: /{tab} would match them too
     app.add_routes([web.get("/", index), web.post("/save", save), web.get("/login", login),
                     web.get("/callback", callback), web.get("/logout", logout),
-                    web.post("/voice/unlock", voice_unlock), web.get("/voice/lock", voice_lock),
                     web.post("/voice/settings", voice_settings), web.get(r"/voice/call/{id:\d+}", voice_call),
                     web.get(r"/voice/call/{id:\d+}.txt", voice_call_txt), web.post(r"/voice/call/{id:\d+}/delete", voice_call_delete),
                     web.get(r"/voice/clip/{id:\d+}.ogg", voice_clip),

@@ -105,7 +105,6 @@ Copy `.env.example` to `.env` and fill it in:
 | `DISCORD_CLIENT_ID` | For the control panel | Developer Portal > your app > OAuth2 > Client ID |
 | `DISCORD_CLIENT_SECRET` | For the control panel | Developer Portal > your app > OAuth2 > Client Secret |
 | `DASH_URL` | No | The control panel's public address (default `https://pitstop.craftyplayz.com`). Add `<DASH_URL>/callback` as a redirect in Developer Portal > OAuth2 |
-| `VOICE_PASSWORD` | No | Second password for the control panel's Voice tab (transcripts and recordings). Leave empty to keep it locked |
 
 ### 2. Run with Docker (recommended)
 ```sh

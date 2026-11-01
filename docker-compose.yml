@@ -38,8 +38,6 @@ services:
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET}
       DASH_URL: ${DASH_URL:-https://pitstop.craftyplayz.com}
       DASH_PORT: 8643
-      # second password for the Voice tab (transcripts and recordings); leave empty to keep it locked
-      VOICE_PASSWORD: ${VOICE_PASSWORD:-}
     # put a reverse proxy (with HTTPS) for the DASH_URL host in front of this port
     ports:
       - "8643:8643"

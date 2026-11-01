@@ -12,7 +12,7 @@ import dash
 from core import db
 
 ENV = {"DISCORD_TOKEN": "t", "GUILD_ID": "1", "DISCORD_CLIENT_ID": "2", "DISCORD_CLIENT_SECRET": "secret",
-       "DASH_URL": "http://pitstop.test", "VOICE_PASSWORD": "pw", "DB_PATH": ":memory:"}
+       "DASH_URL": "http://pitstop.test", "DB_PATH": ":memory:"}
 CHANNELS = [{"id": "10", "name": "Deadlock 1", "type": 2}, {"id": "11", "name": "general", "type": 0}]
 USER = {"id": "5", "name": "Crafty"}
 
@@ -45,17 +45,12 @@ class VoiceTab(unittest.IsolatedAsyncioTestCase):
         await self.client.close()
         self.dir.cleanup()
 
-    def cookies(self, voice=True):
-        exp = time.time() + 600
-        c = {"session": dash.sign(USER | {"exp": exp}, "secret")}
-        if voice:
-            c["voice"] = dash.sign({"id": USER["id"], "exp": exp}, "secret")
-        self.client.session.cookie_jar.update_cookies(c)
+    def cookies(self):
+        self.client.session.cookie_jar.update_cookies({"session": dash.sign(USER | {"exp": time.time() + 600}, "secret")})
 
-    async def test_locked_without_the_voice_password(self):
-        self.cookies(voice=False)
+    async def test_needs_a_login(self):
         page = await (await self.client.get("/voice")).text()
-        self.assertIn("Password needed", page)
+        self.assertIn("Log in with Discord", page)
         self.assertNotIn("Deadlock 1", page)
         self.assertEqual((await self.client.get("/voice/clip/1.ogg")).status, 403)
         self.assertEqual((await self.client.get(f"/voice/call/{self.call}.txt")).status, 403)
