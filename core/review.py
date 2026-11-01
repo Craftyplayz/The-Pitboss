@@ -32,8 +32,9 @@ For each suspected mistake give:
 - question: one short question for the server admin, like "Are 'Vera', 'Bayra' and 'Vyra' all the character Veyra?"
 
 The glossary holds confirmed spellings: use it to spot mistakes, and don't ask about a name it already covers unless it was \
-misheard in a new way. Skip ordinary words that are only slightly off and don't change the meaning. Return an empty list \
-when nothing is worth asking."""
+misheard in a new way. Skip ordinary words that are only slightly off and don't change the meaning. Go through the whole \
+transcript and list every suspected mistake in this one reply, one question each: the admin answers them all at once, so \
+don't hold any back for later. Return an empty list when nothing is worth asking."""
 SUMMARY = """Summarise this call for the server admin:
 - overview: two to four sentences on what the call was about
 - topics: what was talked about
@@ -141,7 +142,8 @@ def ask_claude(client, what, content, effort, schema=None):
 def answered(questions):
     if not any(q["answer"] is not None for q in questions):
         return ""
-    return ("\n\nThe admin already answered these. Don't ask them again, but you may ask follow-ups they raise:\n"
+    return ("\n\nThe admin already answered these. Don't ask them again. Only ask follow-ups their answers raise, or about "
+            "mistakes the corrections made easier to spot:\n"
             + "\n".join(f'- {q["question"]} Answer: {q["answer"] or "leave as is, those words are right"}'
                         for q in questions if q["answer"] is not None))
 
