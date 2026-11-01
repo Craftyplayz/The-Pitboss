@@ -5,6 +5,8 @@ import time
 WINDOW_DAYS = 30
 WINDOW_MIN_MATCHES = 10
 SITE_URL = os.environ.get("SITE_URL", "https://pitboss.craftyplayz.com").rstrip("/")
+# The Pitstop, the control panel; the live voice transcript links to its call page
+DASH_URL = os.environ.get("DASH_URL", "https://pitstop.craftyplayz.com").rstrip("/")
 
 
 def window_start():

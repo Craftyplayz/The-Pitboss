@@ -24,9 +24,10 @@ class VoiceTab(unittest.IsolatedAsyncioTestCase):
             app = dash.make_app()
         app["voice_dir"] = Path(self.dir.name)
         self.db = app["db"]
-        patcher = mock.patch.object(dash, "guild_channels", mock.AsyncMock(return_value=CHANNELS))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, fake in (("guild_channels", mock.AsyncMock(return_value=CHANNELS)), ("discord_get", mock.AsyncMock(side_effect=self.member))):
+            patcher = mock.patch.object(dash, name, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.client = TestClient(TestServer(app))
         await self.client.start_server()
         # a done call with two speakers, one noise-only clip and one still transcribing
@@ -40,6 +41,11 @@ class VoiceTab(unittest.IsolatedAsyncioTestCase):
             db.add_clip(self.db, self.call, member, name, start, 1000, rel)
             if text is not None:
                 db.save_transcript(self.db, i + 1, text=text)
+
+    async def member(self, app, path, auth):
+        if path.endswith("/members/7"):
+            return {"avatar": None, "user": {"avatar": "abc"}}
+        raise dash.web.HTTPBadGateway()  # Ann left the server
 
     async def asyncTearDown(self):
         await self.client.close()
@@ -65,7 +71,22 @@ class VoiceTab(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hello there", page)
         self.assertIn("Bob &lt;b&gt;", page)  # names are escaped
         self.assertIn("Transcribing…", page)
-        self.assertEqual(page.count('class="tl"'), 3)  # the noise-only clip is hidden
+        self.assertEqual(page.count('class="ln"'), 3)  # the noise-only clip is hidden
+        self.assertEqual(page.count('class="msg"'), 3)  # Bob, Ann, Bob: a new group each time the speaker changes
+        self.assertIn("https://cdn.discordapp.com/avatars/7/abc.png", page)
+        self.assertIn(dash.DEFAULT_AVATAR, page)
+
+    async def test_join_and_leave_markers(self):
+        self.cookies()
+        for at, who, before, after in ((1010, "Cat (@cat)", "none", "Deadlock 1"), (1020, "Cat (@cat)", "Deadlock 1", "Lobby"),
+                                       (1030, "Pitboss", "none", "Deadlock 1"), (1040, "Dan (@dan)", "none", "general")):
+            db.add_event(self.db, at, "voice_updated", "voice", "x", user_id=99 if who == "Pitboss" else 3, user_name=who,
+                         data={"changes": {"channel": [before, after]}})
+        page = await (await self.client.get(f"/voice/call/{self.call}")).text()
+        self.assertIn("Cat joined", page)
+        self.assertIn("Cat left", page)  # moved to another channel
+        self.assertNotIn("Pitboss joined", page)  # the recorder itself
+        self.assertNotIn("Dan", page)
 
     async def test_transcript_download(self):
         self.cookies()
@@ -90,6 +111,11 @@ class VoiceTab(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status, 302)
         self.assertEqual(db.autojoin_channels(self.db), {10})  # the text channel is ignored
         self.assertEqual(db.get_setting(self.db, "voice_model"), "medium.en")
+        self.assertIsNone(db.get_setting(self.db, "voice_live_channel"))  # left on the default
+        r = await self.client.post("/voice/settings", data={"model": "small.en", "live": "11"}, headers=origin, allow_redirects=False)
+        self.assertEqual(db.get_setting(self.db, "voice_live_channel"), "11")
+        r = await self.client.post("/voice/settings", data={"model": "small.en", "live": "10"}, headers=origin, allow_redirects=False)
+        self.assertEqual(r.status, 400)  # a voice channel isn't a text channel
         r = await self.client.post("/voice/settings", data={"model": "someone/evil-repo"}, headers=origin, allow_redirects=False)
         self.assertEqual(r.status, 400)
 

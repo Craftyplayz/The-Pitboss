@@ -18,6 +18,16 @@ MAX_MS = 30_000  # whisper reads 30 s at a time; longer monologues get cut here
 MIN_MS = 200  # shorter clips are clicks and coughs
 
 
+def clock(ms):
+    """0:42, 12:05 or 1:02:05 into the call."""
+    s = ms // 1000
+    return f"{s // 3600}:{s // 60 % 60:02}:{s % 60:02}" if s >= 3600 else f"{s // 60}:{s % 60:02}"
+
+
+def short_name(name):
+    return name.split(" (@")[0]  # "Display (@username)" from the recorder
+
+
 def recordable(user):
     """People only: no bots, and no one still pending membership screening (hasn't agreed to the rules)."""
     return user is not None and not user.bot and not getattr(user, "pending", False)

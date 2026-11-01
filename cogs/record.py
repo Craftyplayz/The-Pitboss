@@ -10,8 +10,9 @@ from discord.ext import commands, tasks, voice_recv
 
 from cogs.logs import who
 from core import db
+from core.shared import DASH_URL
 from core.events import KINDS
-from core.voicerec import BYTES_PER_MS, VOICE_DIR, Clipper, clip_path, encode_ogg, recordable
+from core.voicerec import BYTES_PER_MS, VOICE_DIR, Clipper, clip_path, clock, encode_ogg, recordable, short_name
 
 STATUS = "🔴 Recording"  # shown under the channel name while recording
 
@@ -20,6 +21,35 @@ logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)  # 
 
 def people(channel):
     return [m for m in channel.members if recordable(m)]
+
+
+def live_text(clips, limit=4000):
+    """The newest transcript lines that fit in an embed, each speaker's run of lines under their name."""
+    blocks = []  # [member id, name, start ms, [lines]]
+    for c in clips:
+        if not c["text"]:
+            continue  # still transcribing, or only noise
+        if blocks and blocks[-1][0] == c["member_id"]:
+            blocks[-1][3].append(c["text"])
+        else:
+            blocks.append([c["member_id"], short_name(c["member_name"]), c["start_ms"], [c["text"]]])
+    out, size = [], 0
+    for _, name, start, lines in reversed(blocks):
+        block = f"**{discord.utils.escape_markdown(name)}** `{clock(start)}`\n" + "\n".join(discord.utils.escape_markdown(t) for t in lines)
+        if size + len(block) + 2 > limit:
+            out.append("…" + block[-(limit - size - 3):] if not out else "…")  # one huge monologue: keep its end
+            break
+        out.append(block)
+        size += len(block) + 2
+    return "\n\n".join(reversed(out))
+
+
+def live_embed(call_id, channel_name, clips, ended):
+    embed = discord.Embed(title=f"{'Transcript' if ended else '🔴 Live transcript'} · 🔊{channel_name}",
+                          url=f"{DASH_URL}/voice/call/{call_id}", colour=0x8190A3 if ended else 0xE5636D,
+                          description=live_text(clips) or "*Listening…*")
+    embed.set_footer(text="Call ended. Full transcript and audio in The Pitstop" if ended else "Updates as people talk")
+    return embed
 
 
 class Sink(voice_recv.AudioSink):
@@ -46,22 +76,26 @@ class Record(commands.Cog):
         self.bot = bot
         # guild id: (call id, Clipper); Discord allows one voice connection per bot per server
         self.calls = {}
+        # call id: {"message", "channel", "shown", "ended"}; the embed keeps updating after the call until every clip has text
+        self.live = {}
         self.lock = asyncio.Lock()  # two voice events at once would both try to join
 
     async def cog_load(self):
         # a restart drops the voice connection; close what this bot was recording
         self.stale = db.interrupt_calls(self.bot.db, self.bot.user.id, int(time.time()))  # their 🔴 status is cleared on_ready
         self.save_clips.start()
+        self.update_live.start()
 
     async def cog_unload(self):
         self.save_clips.cancel()
+        self.update_live.cancel()
 
     def log(self, kind, summary, channel, user=None):
         db.add_event(self.bot.db, int(time.time()), kind, KINDS[kind], summary, user_id=getattr(user, "id", None),
                      user_name=who(user), channel_id=channel.id, channel_name=channel.name)
 
-    async def start(self, channel, user=None):
-        """Join and record `channel`. Returns why it couldn't, or None."""
+    async def start(self, channel, user=None, post_to=None):
+        """Join and record `channel`, posting the live transcript in `post_to`. Returns why it couldn't, or None."""
         guild = channel.guild
         async with self.lock:
             if guild.voice_client:
@@ -80,6 +114,12 @@ class Record(commands.Cog):
         by = f" by {who(user)}" if user else " automatically"
         self.log("voice_recording_started", f"Recording 🔊{channel.name} started{by}", channel, user)
         await self.set_status(channel, STATUS)
+        if post_to:
+            try:
+                message = await post_to.send(embed=live_embed(call_id, channel.name, [], False))
+                self.live[call_id] = {"message": message, "channel": channel.name, "shown": None, "ended": False}
+            except discord.HTTPException as e:
+                print(f"record: live transcript in {post_to} failed: {e}")
         return None
 
     @staticmethod
@@ -102,6 +142,8 @@ class Record(commands.Cog):
         if call:
             await self.save(call, flush=True)
             db.end_call(self.bot.db, call[0], int(time.time()))
+            if call[0] in self.live:
+                self.live[call[0]]["ended"] = True
             if channel:
                 by = f" by {who(user)}" if user else ""
                 self.log("voice_recording_stopped", f"Recording 🔊{channel.name} stopped{by}", channel, user)
@@ -110,8 +152,13 @@ class Record(commands.Cog):
         for cid in db.autojoin_channels(self.bot.db):
             channel = guild.get_channel(int(cid))
             if isinstance(channel, discord.VoiceChannel) and people(channel):
-                await self.start(channel)
+                await self.start(channel, post_to=self.live_channel(guild) or channel)
                 return
+
+    def live_channel(self, guild):
+        """Where auto-joined calls post their live transcript; None means the voice channel's own chat."""
+        cid = db.get_setting(self.bot.db, "voice_live_channel")
+        return guild.get_channel(int(cid)) if cid else None
 
     async def save(self, call, flush=False):
         call_id, clipper = call
@@ -130,6 +177,23 @@ class Record(commands.Cog):
         for call in list(self.calls.values()):
             await self.save(call)
 
+    @tasks.loop(seconds=3)  # well under Discord's 5 edits per 5 s per channel
+    async def update_live(self):
+        for call_id, live in list(self.live.items()):
+            clips = db.call_clips(self.bot.db, call_id)
+            done = live["ended"] and all(c["text"] is not None or c["error"] for c in clips)
+            embed = live_embed(call_id, live["channel"], clips, done)
+            if embed.description != live["shown"] or done:
+                try:
+                    await live["message"].edit(embed=embed)
+                    live["shown"] = embed.description
+                except discord.NotFound:
+                    done = True  # someone deleted it
+                except discord.HTTPException as e:
+                    print(f"record: live transcript update failed: {e}")
+            if done:
+                del self.live[call_id]
+
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         guild = member.guild
@@ -145,7 +209,7 @@ class Record(commands.Cog):
             await self.stop(guild)
             await self.autojoin(guild)  # another listed channel may still have people in it
         elif not vc and after.channel and after.channel.id in db.autojoin_channels(self.bot.db) and recordable(member):
-            await self.start(after.channel)
+            await self.start(after.channel, post_to=self.live_channel(guild) or after.channel)
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -164,7 +228,7 @@ class Record(commands.Cog):
         if not channel:
             return await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)  # joining voice can take a few seconds
-        error = await self.start(channel, interaction.user)
+        error = await self.start(channel, interaction.user, post_to=interaction.channel)
         await interaction.followup.send(error or f"Recording {channel.mention}. Transcripts show up in The Pitstop's Voice tab.",
                                         ephemeral=True)
 

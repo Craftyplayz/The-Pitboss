@@ -8,6 +8,8 @@ services:
       DEADLOCK_API_KEY: ${DEADLOCK_API_KEY:-}
       # recaps link here
       SITE_URL: ${SITE_URL:-https://pitboss.craftyplayz.com}
+      # live voice transcripts link here
+      DASH_URL: ${DASH_URL:-https://pitstop.craftyplayz.com}
     restart: unless-stopped
     volumes:
       - pitboss-data:/app/data

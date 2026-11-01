@@ -351,6 +351,17 @@ def call_clips(conn, call_id):
     return conn.execute("SELECT * FROM voice_clips WHERE call_id = ? ORDER BY start_ms", (call_id,)).fetchall()
 
 
+def call_joins(conn, call):
+    """[(at, user_id, user name, joined)] from the Server Log: who came and went during the call."""
+    out = []
+    for r in conn.execute("SELECT at, user_id, user_name, data FROM events WHERE kind = 'voice_updated' AND at BETWEEN ? AND ? ORDER BY id",
+                          (call["started_at"], call["ended_at"] or 2 ** 62)):
+        before, after = json.loads(r["data"] or "{}").get("changes", {}).get("channel", [None, None])
+        if call["channel_name"] in (before, after) and before != after and r["user_id"] != call["recorder_id"]:
+            out.append((r["at"], r["user_id"], r["user_name"], after == call["channel_name"]))
+    return out
+
+
 def get_clip(conn, clip_id):
     return conn.execute("SELECT * FROM voice_clips WHERE id = ?", (clip_id,)).fetchone()
 

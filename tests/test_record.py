@@ -102,3 +102,23 @@ class Calls(unittest.TestCase):
         self.assertEqual(db.autojoin_channels(self.conn), set())
         db.set_setting(self.conn, "voice_autojoin", "[1, 2]")
         self.assertEqual(db.autojoin_channels(self.conn), {1, 2})
+
+
+class LiveTranscript(unittest.TestCase):
+    def clip(self, member_id, name, start_ms, text):
+        return {"member_id": member_id, "member_name": name, "start_ms": start_ms, "text": text}
+
+    def test_runs_of_one_speaker_are_grouped(self):
+        from cogs.record import live_text
+        clips = [self.clip(1, "Raygun (@craftyplayz)", 2000, "Oh my god, it's a cat."), self.clip(1, "Raygun (@craftyplayz)", 4000, "Hi *Mr* Fluffins."),
+                 self.clip(2, "Huski (@huski)", 5000, ""), self.clip(2, "Huski (@huski)", 6000, None), self.clip(2, "Huski (@huski)", 65000, "Roll for it.")]
+        self.assertEqual(live_text(clips), "**Raygun** `0:02`\nOh my god, it's a cat.\nHi \*Mr\* Fluffins.\n\n**Huski** `1:05`\nRoll for it.")
+
+    def test_only_the_newest_lines_fit(self):
+        from cogs.record import live_text
+        clips = [self.clip(i % 2, f"P{i % 2}", i * 1000, "x" * 50) for i in range(200)]
+        text = live_text(clips)
+        self.assertLessEqual(len(text), 4000)
+        self.assertTrue(text.startswith("…"))
+        self.assertTrue(text.endswith("**P1** `3:19`\n" + "x" * 50))
+        self.assertLessEqual(len(live_text([self.clip(1, "P", 0, "y" * 5000)])), 4000)  # one huge monologue

@@ -26,7 +26,7 @@ from core import rolemenus
 from core.embeds import GOLD, LIMITS, clean as clean_embed, render as render_embed
 from core import db
 from core.events import CATEGORIES, default_categories
-from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR
+from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR, clock, short_name
 
 PORT = int(os.environ.get("DASH_PORT", 8643))
 DISCORD = "https://discord.com/api/v10"
@@ -50,14 +50,38 @@ CALL_STATUS = {"recording": '<span class="ok">● Recording</span>', "done": "Do
 SPEAKER_COLOURS = ["#5ab0f0", "#F0C35A", "#4fc98a", "#c792ea", "#f09a5a", "#5ad1c9", "#f05aa8", "#b0c45a"]
 # <time data-t> in the viewer's own time zone
 LOCAL_TIMES = "document.querySelectorAll('time[data-t]').forEach(t=>{t.textContent=new Date(t.dataset.t*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'medium'})});"
-# play a line, then carry on with the next; search hides lines; while live, reload unless something is playing or being searched
-CALL_JS = """const A=new Audio(),B=[...document.querySelectorAll('[data-clip]')];let cur=-1;
-function play(i){B.forEach(b=>b.textContent='▶');if(i>=B.length||B[i].closest('.tl').hidden){cur=-1;return}
-cur=i;A.src='/voice/clip/'+B[i].dataset.clip+'.ogg';A.play();B[i].textContent='❚❚'}
-B.forEach((b,i)=>b.onclick=()=>{if(cur===i&&!A.paused){A.pause();b.textContent='▶'}else play(i)});
-A.onended=()=>play(cur+1);
-find.oninput=()=>{const q=find.value.toLowerCase();document.querySelectorAll('.tl').forEach(l=>l.hidden=q&&!l.textContent.toLowerCase().includes(q))};
-if(%s)setInterval(()=>{if(A.paused&&!find.value)location.reload()},5000);"""
+# The call player: CLIPS is [[clip id, start ms, length ms]]. Each clip is fetched and started at its place in the
+# call (Web Audio), 15 s ahead of the playhead, so overlapping speakers play together. `gen` drops clips that finish
+# loading after a pause or seek. While live, the page reloads unless something is playing or being searched.
+CALL_JS = """let ctx,gain,playing=false,pos=0,anchor=0,gen=0,srcs=[],queued=new Set(),dragging=false,lit=null;
+const cache=new Map(),$=id=>document.getElementById(id),lines=[...document.querySelectorAll('.ln')];
+const fmt=ms=>{let s=Math.max(0,Math.floor(ms/1000)),h=Math.floor(s/3600),m=Math.floor(s/60)%60;s%=60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
+const now=()=>playing?pos+(ctx.currentTime-anchor)*1000:pos;
+function load(id){if(!cache.has(id))cache.set(id,fetch('/voice/clip/'+id+'.ogg').then(r=>r.arrayBuffer()).then(b=>ctx.decodeAudioData(b)));return cache.get(id)}
+function queue(){const t=now(),g=gen;for(const[id,s,d]of CLIPS){
+ if(s+d<t-5000)cache.delete(id);
+ if(queued.has(id)||s+d<=t||s>t+15000)continue;queued.add(id);
+ load(id).then(buf=>{if(g!==gen)return;const src=ctx.createBufferSource(),at=anchor+(s-pos)/1000;src.buffer=buf;src.connect(gain);
+  src.start(Math.max(at,ctx.currentTime),Math.max(0,ctx.currentTime-at));srcs.push(src)}).catch(()=>{})}}
+function play(){if(!ctx){ctx=new AudioContext();gain=ctx.createGain();gain.connect(ctx.destination)}ctx.resume();
+ if(pos>=LEN)pos=0;anchor=ctx.currentTime;playing=true;queue();ui()}
+function pause(){pos=now();playing=false;gen++;srcs.forEach(s=>{try{s.stop()}catch(e){}});srcs=[];queued.clear();ui()}
+function seek(ms){const p=playing;if(p)pause();pos=Math.min(Math.max(0,ms),LEN);if(p)play();ui()}
+function ui(){const t=now();$('cur').textContent=fmt(t);$('left').textContent='-'+fmt(LEN-t);if(!dragging)$('bar').value=t;
+ $('pp').textContent=playing?'❚❚':'▶';
+ const on=lines.findLast(l=>+l.dataset.s<=t&&t<+l.dataset.e+500)||null;
+ if(on!==lit){if(lit)lit.classList.remove('on');if(on)on.classList.add('on');lit=on;
+  if(on&&playing&&$('follow').checked)on.scrollIntoView({block:'center',behavior:'smooth'})}}
+setInterval(()=>{if(playing){if(now()>=LEN){pause();pos=LEN}else queue()}ui()},250);
+$('pp').onclick=()=>playing?pause():play();$('back').onclick=()=>seek(now()-15000);$('fwd').onclick=()=>seek(now()+15000);
+$('bar').oninput=()=>{dragging=true;$('cur').textContent=fmt(+$('bar').value)};$('bar').onchange=()=>{dragging=false;seek(+$('bar').value)};
+const jump=ms=>{seek(ms);if(!playing)play()};
+document.querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>jump(+b.dataset.seek));lines.forEach(l=>l.onclick=()=>jump(+l.dataset.s));
+document.querySelectorAll('time[data-tt]').forEach(t=>{t.textContent=new Date(t.dataset.tt*1000).toLocaleTimeString()});
+$('find').oninput=()=>{const q=$('find').value.toLowerCase();lines.forEach(l=>l.hidden=!!q&&!l.textContent.toLowerCase().includes(q));
+ document.querySelectorAll('.msg').forEach(m=>m.hidden=![...m.querySelectorAll('.ln')].some(l=>!l.hidden));
+ document.querySelectorAll('.jl').forEach(j=>j.hidden=!!q)};
+if(LIVE)setInterval(()=>{if(!playing&&!$('find').value)location.reload()},5000);"""
 
 
 def sign(data, key):
@@ -402,15 +426,6 @@ async def games_tab(request):
     return soon("Daily Wordle", "Marriages", "Giveaways")
 
 
-def clock(ms):
-    s = ms // 1000
-    return f"{s // 3600}:{s // 60 % 60:02}:{s % 60:02}" if s >= 3600 else f"{s // 60}:{s % 60:02}"
-
-
-def short_name(name):
-    return name.split(" (@")[0]  # "Display (@username)" from the recorder
-
-
 def utc_time(at):
     return f'<time data-t="{at}">{datetime.fromtimestamp(at, timezone.utc):%Y-%m-%d %H:%M} UTC</time>'
 
@@ -422,9 +437,15 @@ def voice_settings_card(app, channels):
                     for c in channels if c["type"] in VOICE)
     model = db.get_setting(app["db"], "voice_model") or DEFAULT_MODEL
     options = "".join(f'<option{" selected" if m == model else ""}>{m}</option>' for m in MODELS)
+    live = db.get_setting(app["db"], "voice_live_channel") or ""
+    live_options = "<option value=\"\">The voice channel's own chat</option>" + "".join(
+        f'<option value="{c["id"]}"{" selected" if c["id"] == live else ""}>#{html.escape(c["name"])}</option>'
+        for c in channels if c["type"] in TEXT)
     return (f'<form method="post" action="/voice/settings" class="card"><h2>Settings</h2>'
             f'<label>Join these channels by itself when someone is in them</label>{boxes or "<p>No voice channels.</p>"}'
             '<p><small>Admins can also record any channel with /record start in Discord. The bot records one channel at a time.</small></p>'
+            f'<label for="live">Live transcript for calls it joins by itself</label><select id="live" name="live">{live_options}</select>'
+            '<p><small>Everyone who can see that channel can read the live transcript. With /record start it posts where the command was run.</small></p>'
             f'<label for="model">Speech-to-text model</label><select id="model" name="model">{options}</select>'
             '<p><small>small.en keeps up with live calls on a 6-core CPU. medium.en is more accurate but about 3 times slower. '
             'A change applies to clips recorded after it.</small></p><button class="btn" type="submit">Save</button></form>')
@@ -456,11 +477,17 @@ async def voice_tab(request):
 async def voice_settings(request):
     app, user = request.app, check_post(request)
     posted = await request.post()
-    names = {c["id"]: c["name"] for c in await guild_channels(app) if c["type"] in VOICE}
+    channels = await guild_channels(app)
+    names = {c["id"]: c["name"] for c in channels if c["type"] in VOICE}
+    texts = {c["id"]: c["name"] for c in channels if c["type"] in TEXT}
     picked = sorted(int(v) for v in posted.getall("autojoin", []) if v in names)
     model = posted.get("model")
-    if model not in MODELS:
-        raise web.HTTPBadRequest(text="Unknown model")
+    live = posted.get("live", "")
+    if model not in MODELS or (live and live not in texts):
+        raise web.HTTPBadRequest(text="Unknown model or channel")
+    if live != (db.get_setting(app["db"], "voice_live_channel") or ""):
+        db.set_setting(app["db"], "voice_live_channel", live)
+        panel_log(app, user, "set the live transcript channel: " + (f"#{texts[live]}" if live else "the voice channel's own chat"))
     if set(picked) != db.autojoin_channels(app["db"]):
         db.set_setting(app["db"], "voice_autojoin", json.dumps(picked))
         panel_log(app, user, "set voice auto-join channels: " + (", ".join(f"🔊{names[str(c)]}" for c in picked) or "none"))
@@ -470,16 +497,60 @@ async def voice_settings(request):
     raise web.HTTPFound("/voice?saved")
 
 
-def transcript_line(clip, colour):
+async def avatars(app, member_ids):
+    """{member id: avatar url}, server avatar first. Cached: one Discord lookup per member per hour."""
+    cache = app["cache"].setdefault("avatars", {})
+
+    async def one(mid):
+        if mid in cache and cache[mid][1] > time.time():
+            return
+        url = DEFAULT_AVATAR
+        try:
+            m = await discord_get(app, f"/guilds/{app['guild_id']}/members/{mid}", f"Bot {app['token']}")
+            if m.get("avatar"):
+                url = f"https://cdn.discordapp.com/guilds/{app['guild_id']}/users/{mid}/avatars/{m['avatar']}.png?size=64"
+            elif m["user"].get("avatar"):
+                url = f"https://cdn.discordapp.com/avatars/{mid}/{m['user']['avatar']}.png?size=64"
+        except web.HTTPBadGateway:
+            pass  # left the server: default avatar
+        cache[mid] = (url, time.time() + 3600)
+
+    await asyncio.gather(*(one(m) for m in member_ids))
+    return {m: cache[m][0] for m in member_ids}
+
+
+def clip_text(clip):
     e = html.escape
     if clip["text"] is not None:
-        text = e(clip["text"])
-    elif clip["error"]:
-        text = f'<i class="bad">Couldn\'t transcribe: {e(clip["error"])}</i>'
-    else:
-        text = "<i>Transcribing…</i>"
-    return (f'<div class="tl" style="--c:{colour}"><button type="button" class="ib" data-clip="{clip["id"]}" aria-label="Play">▶</button>'
-            f'<span class="tt">{clock(clip["start_ms"])}</span><b>{e(short_name(clip["member_name"]))}</b><span>{text}</span></div>')
+        return e(clip["text"])
+    if clip["error"]:
+        return f'<i class="bad">Couldn\'t transcribe: {e(clip["error"])}</i>'
+    return "<i class=wait>Transcribing…</i>"
+
+
+def timeline(call, clips, joins, faces, colours):
+    """Messages grouped by speaker, like a chat, with join and leave markers between them."""
+    e = html.escape
+    items = [(c["start_ms"], 1, c) for c in clips if c["text"] != ""]  # "" was only noise
+    items += [((at - call["started_at"]) * 1000, 0, (at, uid, name, joined)) for at, uid, name, joined in joins]
+    groups = []  # a join/leave tuple, or [first clip, [clips]] for one speaker's run of lines
+    for _, is_clip, item in sorted(items, key=lambda i: (i[0], i[1])):
+        if is_clip and groups and isinstance(groups[-1], list) and groups[-1][0]["member_id"] == item["member_id"]:
+            groups[-1][1].append(item)
+        else:
+            groups.append([item, [item]] if is_clip else item)
+    out = []
+    for g in groups:
+        if isinstance(g, tuple):
+            at, _, name, joined = g
+            out.append(f'<div class="jl">{e(short_name(name or "Someone"))} {"joined" if joined else "left"} · <time data-tt="{at}"></time></div>')
+            continue
+        first, run = g
+        lines = "".join(f'<p class="ln" data-s="{c["start_ms"]}" data-e="{c["start_ms"] + c["duration_ms"]}">{clip_text(c)}</p>' for c in run)
+        out.append(f'<div class="msg"><img class="av" src="{e(faces[first["member_id"]])}" alt=""><div>'
+                   f'<div class="mh"><b style="color:{colours[first["member_id"]]}">{e(short_name(first["member_name"]))}</b>'
+                   f'<button type="button" class="tt" data-seek="{first["start_ms"]}">{clock(first["start_ms"])}</button></div>{lines}</div></div>')
+    return "".join(out)
 
 
 async def voice_call(request):
@@ -490,20 +561,35 @@ async def voice_call(request):
     if not call:
         raise web.HTTPNotFound()
     clips = db.call_clips(app["db"], call["id"])
-    colours = {}
+    colours, names = {}, {}
     for c in clips:
         colours.setdefault(c["member_id"], SPEAKER_COLOURS[len(colours) % len(SPEAKER_COLOURS)])
-    lines = "".join(transcript_line(c, colours[c["member_id"]]) for c in clips if c["text"] != "")  # "" was only noise
+        names[c["member_id"]] = short_name(c["member_name"])
+    faces = await avatars(app, list(colours))
+    length_ms = ((call["ended_at"] or int(time.time())) - call["started_at"]) * 1000
     live = call["status"] == "recording" or any(c["text"] is None and not c["error"] for c in clips)
-    delete = ("<p><small>Stop the recording before deleting this call.</small></p>" if call["status"] == "recording" else
-              f'<form method="post" action="/voice/call/{call["id"]}/delete" onsubmit="return confirm(\'Delete this call, its transcript and its audio for good?\')">'
+    # the player schedules every clip at its place in the call, so people talking over each other play together
+    player_clips = json.dumps([[c["id"], c["start_ms"], c["duration_ms"]] for c in clips if c["text"] != ""])
+    delete = ("<small>Stop the recording before deleting this call.</small>" if call["status"] == "recording" else
+              f'<form method="post" action="/voice/call/{call["id"]}/delete" style="display:inline" '
+              'onsubmit="return confirm(\'Delete this call, its transcript and its audio for good?\')">'
               '<button class="btn danger" type="submit">Delete call</button></form>')
-    body = (f'<p><a href="/voice">← All calls</a> · {CALL_STATUS.get(call["status"], call["status"])}</p>'
-            f'<div class="card"><input id="find" type="search" placeholder="Search the transcript">'
-            f'<div id="tls">{lines or "<p class=empty>Nothing said yet.</p>"}</div></div>'
-            f'<a class="btn ghost" href="/voice/call/{call["id"]}.txt">Download transcript</a> {delete}'
-            f"<script>{LOCAL_TIMES}{CALL_JS % ('true' if live else 'false')}</script>")
-    return layout("voice", user, body, label=f"🔊{html.escape(call['channel_name'])}", subtitle=utc_time(call["started_at"]))
+    faces_html = "".join(f'<img class="av mini" src="{html.escape(u)}" alt="{html.escape(names[m])}" title="{html.escape(names[m])}">'
+                         for m, u in faces.items())
+    subtitle = (f'{utc_time(call["started_at"])} · {clock(length_ms)} · {CALL_STATUS.get(call["status"], call["status"])}'
+                f'<span class="faces">{faces_html}</span>')
+    body = (f'<div class="callbar"><a href="/voice">← All calls</a><span><a class="btn ghost" href="/voice/call/{call["id"]}.txt">'
+            f'Download transcript</a> {delete}</span></div>'
+            f'<input id="find" type="search" placeholder="Search the transcript">'
+            f'<div id="tls">{timeline(call, clips, db.call_joins(app["db"], call), faces, colours) or "<p class=empty>Nothing said yet.</p>"}</div>'
+            '<div id="player"><button type="button" class="pb" id="back" aria-label="Back 15 seconds">↺15</button>'
+            '<button type="button" class="pb play" id="pp" aria-label="Play">▶</button>'
+            '<button type="button" class="pb" id="fwd" aria-label="Forward 15 seconds">15↻</button>'
+            f'<span id="cur" class="tt">0:00</span><input id="bar" type="range" min="0" max="{length_ms}" value="0" aria-label="Position">'
+            f'<span id="left" class="tt">-{clock(length_ms)}</span>'
+            '<label class="check"><input type="checkbox" id="follow" checked> Follow along</label></div>'
+            f"<script>const CLIPS={player_clips},LEN={length_ms},LIVE={'true' if live else 'false'};{LOCAL_TIMES}{CALL_JS}</script>")
+    return layout("voice", user, body, label=f"🔊{html.escape(call['channel_name'])}", subtitle=subtitle)
 
 
 async def voice_call_txt(request):
@@ -823,9 +909,21 @@ figcaption{text-align:center;color:var(--mu);font-size:12px}
 .files{list-style:none;padding:0}.files li{margin:6px 0}.files img{display:block;max-width:320px;max-height:240px;border-radius:8px;margin-bottom:4px}
 .raw summary{color:var(--mu);cursor:pointer;font-size:12px}.pager{display:flex;justify-content:space-between;margin:14px 0}
 main.wide{max-width:none}
-#find{margin-bottom:12px}.tl{display:grid;grid-template-columns:30px 52px 150px 1fr;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)}
-.tl b{color:var(--c);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tl .tt{color:var(--mu);font-variant-numeric:tabular-nums}.tl .ib{height:26px}
-@media(max-width:820px){.tl{grid-template-columns:30px 52px 1fr}.tl>span:last-child{grid-column:2/-1}}
+.callbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.callbar span{display:flex;gap:8px;align-items:center}
+.callbar form{margin:0}.callbar .btn{margin:0}#find{margin-bottom:8px}
+.msg{display:grid;grid-template-columns:40px 1fr;gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.av{width:40px;height:40px;border-radius:50%;object-fit:cover;background:var(--card)}
+.av.mini{width:26px;height:26px;margin-left:-7px;border:2px solid var(--bg);vertical-align:middle}.faces{margin-left:14px;padding-left:7px}
+.mh{display:flex;gap:8px;align-items:baseline}.mh b{font-size:15px}
+.tt{color:var(--mu);font-size:12px;font-variant-numeric:tabular-nums;background:none;border:0;padding:0}button.tt{cursor:pointer}button.tt:hover{color:var(--tx)}
+.ln{margin:4px 0 0 -8px;padding:3px 8px;border-radius:6px;cursor:pointer;line-height:1.55}.ln:hover{background:var(--card)}
+.ln.on{background:rgba(240,195,90,.15)}.ln .wait{color:var(--mu)}
+.jl{font-size:12px;font-style:italic;color:var(--mu);padding:8px 0 8px 54px;border-bottom:1px solid var(--line)}
+#player{position:sticky;bottom:12px;margin-top:16px;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
+border-radius:var(--r);padding:10px 16px;box-shadow:0 8px 28px rgba(0,0,0,.45)}#player #bar{flex:1;width:auto;min-width:60px;accent-color:var(--gold)}
+.pb{background:none;border:1px solid var(--line);color:var(--tx);border-radius:50%;width:38px;height:38px;cursor:pointer;font-size:11px;flex:none}
+.pb.play{width:46px;height:46px;background:var(--gold);color:#111;border:0;font-size:16px}#player .check{white-space:nowrap;margin:0}
+@media(max-width:820px){#player{flex-wrap:wrap}#player #bar{order:5;flex-basis:100%}}
 @media(max-width:820px){.ev>summary{grid-template-columns:1fr auto}.ev .sm{grid-column:1/-1}.ba{grid-template-columns:1fr}}
 label.check{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--tx);cursor:pointer}label.check input{width:auto}
 input[type=color]{height:38px;padding:3px;cursor:pointer}.phs{margin:12px 0 4px;font-size:12px;color:var(--mu)}
