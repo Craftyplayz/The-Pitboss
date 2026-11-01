@@ -385,9 +385,10 @@ def untranscribed_clips(conn, limit=20):
 
 
 def clip_to_upgrade(conn, model):
-    """A clip from a finished call that a weaker model wrote, to redo with `model`. Noise-only clips stay empty with any model."""
-    return conn.execute("SELECT v.* FROM voice_clips v JOIN voice_calls c ON c.id = v.call_id WHERE c.status != 'recording' "
-                        "AND v.text != '' AND v.model IS NOT NULL AND v.model != ? ORDER BY v.id LIMIT 1", (model,)).fetchone()
+    """The oldest line another model wrote, to rewrite with `model`, live calls included. Noise-only clips stay empty
+    with any model, and a clip whose rewrite failed keeps its error instead of being retried."""
+    return conn.execute("SELECT * FROM voice_clips WHERE text != '' AND error IS NULL AND model IS NOT NULL AND model != ? "
+                        "ORDER BY id LIMIT 1", (model,)).fetchone()
 
 
 def save_transcript(conn, clip_id, text=None, error=None, model=None):

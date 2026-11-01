@@ -8,7 +8,7 @@ Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 i
 - New /record command: the bot joins your voice channel and records it for transcripts. It can also join set channels by itself.
 - Recorded calls are turned into text a few seconds after each sentence.
 - While recording, the bot posts a live transcript that updates as people talk.
-- Transcripts use the most accurate model the server can keep up with, stepping down only as far as needed, and finished calls get redone with it.
+- Transcripts appear straight away from a fast model, then get rewritten by a more accurate one as soon as the server has time.
 - The Pitstop's Voice tab shows each recorded call's transcript, lets admins replay any line, and picks which channels the bot records by itself.
 
 ## 1.8.0

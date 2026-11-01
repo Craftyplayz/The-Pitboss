@@ -439,7 +439,7 @@ def voice_settings_card(app, channels):
     model = db.get_setting(app["db"], "voice_model") or DEFAULT_MODEL
     options = "".join(f'<option{" selected" if m == model else ""}>{m}</option>' for m in MODELS)
     fast = fast_model(app)
-    fast_options = f'<option value=""{" selected" if not fast else ""}>Never switch</option>' + "".join(
+    fast_options = f'<option value=""{" selected" if not fast else ""}>None: the final model writes every line</option>' + "".join(
         f'<option{" selected" if m == fast else ""}>{m}</option>' for m in MODELS)
     live = db.get_setting(app["db"], "voice_live_channel") or ""
     live_options = "<option value=\"\">The voice channel's own chat</option>" + "".join(
@@ -450,16 +450,16 @@ def voice_settings_card(app, channels):
             '<p><small>Admins can also record any channel with /record start in Discord. The bot records one channel at a time.</small></p>'
             f'<label for="live">Live transcript for calls it joins by itself</label><select id="live" name="live">{live_options}</select>'
             '<p><small>Everyone who can see that channel can read the live transcript. With /record start it posts where the command was run.</small></p>'
-            f'<label for="model">Best speech-to-text model</label><select id="model" name="model">{options}</select>'
-            f'<label for="fast">Lowest model when it falls behind</label><select id="fast" name="fast">{fast_options}</select>'
-            '<p><small>It transcribes with the best model while it keeps up. Once a sentence has waited 15 seconds it steps down '
-            'one model (large-v3-turbo, then medium.en, then small.en) as far as the lowest one picked, and steps back up after '
-            'each quiet minute. When nothing is waiting, it redoes finished calls\' lower-model lines with the best model; lines '
-            'the best model wrote are never redone.</small></p><button class="btn" type="submit">Save</button></form>')
+            f'<label for="fast">Live model (fast)</label><select id="fast" name="fast">{fast_options}</select>'
+            f'<label for="model">Final model (accurate)</label><select id="model" name="model">{options}</select>'
+            '<p><small>The live model writes each line as soon as someone stops talking, so the transcript keeps up. The final '
+            'model then rewrites every line, oldest first, whenever nothing is waiting for the live model: it falls behind in busy '
+            'moments and catches up when it\'s quiet or after the call. small.en live and large-v3-turbo final is a good pair on '
+            'a 6-core CPU.</small></p><button class="btn" type="submit">Save</button></form>')
 
 
 def fast_model(app):
-    """The lowest model setting: a model name, or "" for never switch. Unset means small.en, like the transcriber."""
+    """The live model setting: a model name, or "" for none. Unset means small.en, like the transcriber."""
     fast = db.get_setting(app["db"], "voice_fast_model")
     return DEFAULT_MODEL if fast is None else fast
 
@@ -500,7 +500,7 @@ async def voice_settings(request):
         raise web.HTTPBadRequest(text="Unknown model or channel")
     if fast != fast_model(app):
         db.set_setting(app["db"], "voice_fast_model", fast)
-        panel_log(app, user, f"set the lowest speech-to-text model: {fast or 'never switch'}")
+        panel_log(app, user, f"set the live speech-to-text model: {fast or 'none'}")
     if live != (db.get_setting(app["db"], "voice_live_channel") or ""):
         db.set_setting(app["db"], "voice_live_channel", live)
         panel_log(app, user, "set the live transcript channel: " + (f"#{texts[live]}" if live else "the voice channel's own chat"))
@@ -509,7 +509,7 @@ async def voice_settings(request):
         panel_log(app, user, "set voice auto-join channels: " + (", ".join(f"🔊{names[str(c)]}" for c in picked) or "none"))
     if model != (db.get_setting(app["db"], "voice_model") or DEFAULT_MODEL):
         db.set_setting(app["db"], "voice_model", model)
-        panel_log(app, user, f"set the best speech-to-text model: {model}")
+        panel_log(app, user, f"set the final speech-to-text model: {model}")
     raise web.HTTPFound("/voice?saved")
 
 

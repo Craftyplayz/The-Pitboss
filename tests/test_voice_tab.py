@@ -118,7 +118,7 @@ class VoiceTab(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status, 400)  # a voice channel isn't a text channel
         self.assertIsNone(db.get_setting(self.db, "voice_fast_model"))  # left on small.en
         await self.client.post("/voice/settings", data={"model": "large-v3-turbo", "fast": ""}, headers=origin, allow_redirects=False)
-        self.assertEqual(db.get_setting(self.db, "voice_fast_model"), "")  # never switch
+        self.assertEqual(db.get_setting(self.db, "voice_fast_model"), "")  # no live model: the final model writes every line
         r = await self.client.post("/voice/settings", data={"model": "small.en", "fast": "evil/repo"}, headers=origin, allow_redirects=False)
         self.assertEqual(r.status, 400)
         r = await self.client.post("/voice/settings", data={"model": "someone/evil-repo"}, headers=origin, allow_redirects=False)

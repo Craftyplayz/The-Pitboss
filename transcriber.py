@@ -1,9 +1,11 @@
-"""Transcriber: turns each recorded voice clip into text as soon as it's saved. Its own process so the CPU work never freezes the bot.
+"""Transcriber: turns each recorded voice clip into text. Its own process so the CPU work never freezes the bot.
 
-It uses the best model while it keeps up and steps down one model at a time (to the lowest one picked) when clips start
-waiting, and back up when it's quiet. Once nothing is waiting it redoes finished calls' clips that a lower model wrote,
-with the best model. A clip the best model wrote is never redone."""
+Two workers run side by side. The live worker writes every new clip with the fast live model straight away, so the
+transcript keeps up with the conversation. The final worker rewrites each of those lines with the accurate final model,
+oldest first, but only starts a clip while nothing waits for the live worker: in a busy call it falls behind, and in
+quiet moments and after the call it catches up. A line the final model wrote is never redone."""
 import os
+import threading
 import time
 
 import av
@@ -15,50 +17,15 @@ from core.voicerec import DEFAULT_MODEL, MODELS, VOICE_DIR
 
 # models download here once, on the shared volume, so restarts don't fetch them again
 MODEL_DIR = VOICE_DIR.parent / "whisper"
-# half the CPU threads: the bot, website and control panel share the machine
+# half the CPU threads per model: the bot, website and control panel share the machine
 THREADS = max(1, (os.cpu_count() or 2) // 2)
-BEHIND_S = 15  # a clip waiting this long steps down a model; still behind 15 s later, another step
-CALM_S = 60  # the queue must stay empty this long for each step back up, so it doesn't flip back and forth
 
 
-def pick_model(setting):
-    return setting if setting in MODELS else DEFAULT_MODEL
-
-
-def ladder(best, lowest_setting):
-    """Models to step through, best first: every model from the best down to the lowest picked.
-    Unset means down to small.en; "" means never switch."""
-    lowest = DEFAULT_MODEL if lowest_setting is None else lowest_setting
-    if lowest not in MODELS or MODELS.index(lowest) >= MODELS.index(best):
-        return [best]
-    return list(reversed(MODELS[MODELS.index(lowest):MODELS.index(best) + 1]))
-
-
-class Pace:
-    """How many steps down the ladder to be right now; 0 is the best model."""
-
-    def __init__(self):
-        self.level = 0
-        self.changed = None
-        self.empty_since = None
-
-    def update(self, oldest_wait, now, steps):
-        """`oldest_wait`: seconds the oldest waiting clip has waited, None when nothing waits. `now`: a monotonic clock.
-        `steps`: how many models the ladder has."""
-        if oldest_wait is None:
-            if self.empty_since is None:
-                self.empty_since = now
-            if self.level and now - self.empty_since >= CALM_S:
-                self.level -= 1
-                self.empty_since = now  # the next step up needs another quiet minute
-        else:
-            self.empty_since = None
-            settled = self.changed is None or now - self.changed >= BEHIND_S  # give the new model a chance first
-            if oldest_wait >= BEHIND_S and settled and self.level < steps - 1:
-                self.level += 1
-                self.changed = now
-        self.level = min(self.level, steps - 1)  # the ladder got shorter in settings
-        return self.level
+def pick_models(final_setting, live_setting):
+    """(live model, final model). Unset live means small.en; "" means the final model does everything."""
+    final = final_setting if final_setting in MODELS else DEFAULT_MODEL
+    live = DEFAULT_MODEL if live_setting is None else live_setting
+    return (live if live in MODELS else final), final
 
 
 def load(path):
@@ -81,48 +48,60 @@ def do_clip(conn, model, name, clip, upgrade=False):
     try:
         text = transcribe(model, VOICE_DIR / clip["file"])
     except Exception as e:  # one broken clip shouldn't stop the rest; the panel shows the error
-        if not upgrade:  # a failed upgrade keeps the text it had
-            db.save_transcript(conn, clip["id"], error=repr(e)[:500])
+        # a failed rewrite keeps the live text; the error stops it being retried forever
+        db.save_transcript(conn, clip["id"], text=clip["text"] if upgrade else None, error=repr(e)[:500],
+                           model=clip["model"] if upgrade else None)
         print(f"transcriber: clip {clip['id']} failed: {e!r}")
         return
     db.save_transcript(conn, clip["id"], text=text, model=name)
     took = time.monotonic() - started
-    print(f"transcriber: {'upgraded ' if upgrade else ''}clip {clip['id']} ({clip['duration_ms'] / 1000:.1f}s) with {name} "
+    print(f"transcriber: {'rewrote' if upgrade else 'wrote'} clip {clip['id']} ({clip['duration_ms'] / 1000:.1f}s) with {name} "
           f"in {took:.1f}s ({clip['duration_ms'] / 1000 / max(took, 0.01):.1f}x real time)")
 
 
-def step(conn, models, pace, steps):
-    """Transcribe one clip: the oldest waiting one, else a finished call's clip to upgrade. Returns False when idle.
-    `models(name)` gives a loaded model; `steps` is the ladder, best model first."""
+def live_step(conn, models, live):
+    """Write the oldest new clip. Returns False when none wait. `models(name)` gives a loaded model."""
     waiting = db.untranscribed_clips(conn, limit=1)
-    wait = time.time() - waiting[0]["ready_at"] if waiting else None
-    name, best = steps[pace.update(wait, time.monotonic(), len(steps))], steps[0]
     if waiting:
-        do_clip(conn, models(name), name, waiting[0])
-        return True
-    if pace.level == 0 and (clip := db.clip_to_upgrade(conn, best)):
-        do_clip(conn, models(best), best, clip, upgrade=True)
-        return True
-    return False
+        do_clip(conn, models(live), live, waiting[0])
+    return bool(waiting)
+
+
+def final_step(conn, models, final):
+    """Rewrite the oldest line another model wrote, but only while the live worker has nothing waiting."""
+    if db.untranscribed_clips(conn, limit=1):
+        return False
+    clip = db.clip_to_upgrade(conn, final)
+    if clip:
+        do_clip(conn, models(final), final, clip, upgrade=True)
+    return bool(clip)
+
+
+def worker(db_path, models, pick, step, idle):
+    conn = db.connect(db_path)  # one connection per thread: sqlite3 connections can't be shared between threads
+    while True:
+        # read every turn, so a change in The Pitstop's Voice settings applies to the next clip
+        live, final = pick_models(db.get_setting(conn, "voice_model"), db.get_setting(conn, "voice_fast_model"))
+        if not step(conn, models, pick(live, final)):
+            time.sleep(idle)
 
 
 def main():
-    conn = db.connect(os.environ.get("DB_PATH", "data/pitboss.db"))
-    loaded, pace = {}, Pace()
+    if hasattr(os, "nice"):  # Linux, like the Docker image; Windows has no nice
+        os.nice(10)  # low CPU priority: the bot and anything else on the server go first
+    db_path = os.environ.get("DB_PATH", "data/pitboss.db")
+    loaded, lock = {}, threading.Lock()
 
     def models(name):
-        if name not in loaded:
-            print(f"transcriber: loading {name} on {THREADS} threads")
-            loaded[name] = WhisperModel(name, device="cpu", compute_type="int8", cpu_threads=THREADS, download_root=str(MODEL_DIR))
-        return loaded[name]
+        with lock:  # both workers may ask for a model the first time at once
+            if name not in loaded:
+                print(f"transcriber: loading {name} on {THREADS} threads")
+                loaded[name] = WhisperModel(name, device="cpu", compute_type="int8", cpu_threads=THREADS,
+                                            download_root=str(MODEL_DIR))
+            return loaded[name]
 
-    while True:
-        # both read every step, so a change in The Pitstop's Voice settings applies to the next clip
-        steps = ladder(pick_model(db.get_setting(conn, "voice_model")), db.get_setting(conn, "voice_fast_model"))
-        for name in [n for n in loaded if n not in steps]:
-            del loaded[name]  # a model nobody picked any more
-        if not step(conn, models, pace, steps):
-            time.sleep(1)
+    threading.Thread(target=worker, args=(db_path, models, lambda live, final: final, final_step, 1), daemon=True).start()
+    worker(db_path, models, lambda live, final: live, live_step, 0.25)
 
 
 if __name__ == "__main__":

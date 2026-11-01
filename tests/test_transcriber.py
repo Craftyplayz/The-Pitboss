@@ -10,9 +10,6 @@ from core import db
 from core.voicerec import clip_path, encode_ogg
 
 
-LADDER = ["large-v3-turbo", "medium.en", "small.en"]
-
-
 class FakeModel:
     def __init__(self, name):
         self.name = name
@@ -25,39 +22,12 @@ class FakeModel:
 
 class Settings(unittest.TestCase):
     def test_models_are_checked(self):
-        self.assertEqual(transcriber.pick_model("medium.en"), "medium.en")
-        self.assertEqual(transcriber.pick_model(None), "small.en")
-        self.assertEqual(transcriber.pick_model("someone/evil-repo"), "small.en")  # a model name is a download
-        ladder = transcriber.ladder
-        self.assertEqual(ladder("large-v3-turbo", None), ["large-v3-turbo", "medium.en", "small.en"])  # unset: down to small
-        self.assertEqual(ladder("large-v3-turbo", "medium.en"), ["large-v3-turbo", "medium.en"])
-        self.assertEqual(ladder("large-v3-turbo", ""), ["large-v3-turbo"])  # never switch
-        self.assertEqual(ladder("small.en", "medium.en"), ["small.en"])  # "lowest" above the best: no switching
-        self.assertEqual(ladder("medium.en", "someone/evil-repo"), ["medium.en"])
-
-
-class PaceRule(unittest.TestCase):
-    B, C = transcriber.BEHIND_S, transcriber.CALM_S
-
-    def test_steps_down_one_model_at_a_time_and_back_up_after_quiet_minutes(self):
-        p = transcriber.Pace()
-        self.assertEqual(p.update(3, 0, 3), 0)  # keeping up: large
-        self.assertEqual(p.update(self.B, 1, 3), 1)  # behind: medium
-        self.assertEqual(p.update(self.B + 5, 2, 3), 1)  # still behind, but medium gets 15 s to catch up first
-        self.assertEqual(p.update(self.B + 20, 1 + self.B, 3), 2)  # medium couldn't keep up either: small
-        self.assertEqual(p.update(self.B + 30, 100, 3), 2)  # nothing lower to go to
-        self.assertEqual(p.update(None, 200, 3), 2)  # empty, but not for long
-        self.assertEqual(p.update(1, 230, 3), 2)  # a clip arrived: the quiet minute starts over
-        self.assertEqual(p.update(None, 231, 3), 2)
-        self.assertEqual(p.update(None, 231 + self.C, 3), 1)  # one step up per quiet minute
-        self.assertEqual(p.update(None, 231 + self.C + 1, 3), 1)
-        self.assertEqual(p.update(None, 231 + 2 * self.C, 3), 0)
-
-    def test_a_shorter_ladder_in_settings(self):
-        p = transcriber.Pace()
-        p.update(self.B, 0, 3)
-        p.update(self.B, self.B, 3)
-        self.assertEqual(p.update(self.B, 2 * self.B, 2), 1)  # the lowest model was raised to medium
+        pick = transcriber.pick_models
+        self.assertEqual(pick("large-v3-turbo", None), ("small.en", "large-v3-turbo"))  # live unset: small.en
+        self.assertEqual(pick("large-v3-turbo", "base.en"), ("base.en", "large-v3-turbo"))
+        self.assertEqual(pick("large-v3-turbo", ""), ("large-v3-turbo", "large-v3-turbo"))  # the final model does everything
+        self.assertEqual(pick(None, None), ("small.en", "small.en"))
+        self.assertEqual(pick("someone/evil-repo", "evil/too"), ("small.en", "small.en"))  # a model name is a download
 
 
 class Steps(unittest.TestCase):
@@ -88,52 +58,41 @@ class Steps(unittest.TestCase):
     def rows(self):
         return [tuple(r) for r in self.conn.execute("SELECT start_ms, text, error, model FROM voice_clips ORDER BY id")]
 
-    def test_waiting_clips_first_then_upgrades_then_idle(self):
-        now = int(time.time())
-        old, live = self.call(now - 600), self.call(now, ended=False)
-        self.clip(old, 0)
-        self.clip(live, 0)
-        self.clip(live, 2000, ms=300)  # too short for the fake model: an error
-        pace = transcriber.Pace()
-        with self.conn:  # pretend the old call's first clip was done fast during the call
-            self.conn.execute("UPDATE voice_clips SET text = 'hi', model = 'small.en' WHERE start_ms = 0 AND call_id = ?", (old,))
-        for _ in range(2):
-            self.assertTrue(transcriber.step(self.conn, self.models, pace, LADDER))
-        self.assertEqual(self.used, ["large-v3-turbo", "large-v3-turbo"])  # keeping up: the best model
-        self.assertTrue(transcriber.step(self.conn, self.models, pace, LADDER))  # the upgrade
-        self.assertFalse(transcriber.step(self.conn, self.models, pace, LADDER))
-        self.assertEqual(self.rows(), [(0, "Hello from large-v3-turbo.", None, "large-v3-turbo"),  # upgraded
-                                       (0, "Hello from large-v3-turbo.", None, "large-v3-turbo"),
-                                       (2000, None, "RuntimeError('too short')", None)])
-
-    def test_behind_steps_down_and_skips_upgrades(self):
-        call_id = self.call(int(time.time()) - 600)  # its clips ended ten minutes ago: far behind
+    def test_live_writes_new_clips_and_final_rewrites_them(self):
+        call_id = self.call(int(time.time()), ended=False)  # still recording: rewrites don't wait for the call to end
         self.clip(call_id, 0)
         self.clip(call_id, 2000)
-        pace = transcriber.Pace()
-        while transcriber.step(self.conn, self.models, pace, LADDER):
+        self.assertFalse(transcriber.final_step(self.conn, self.models, "large-v3-turbo"))  # nothing written yet
+        self.assertTrue(transcriber.live_step(self.conn, self.models, "small.en"))
+        self.assertFalse(transcriber.final_step(self.conn, self.models, "large-v3-turbo"))  # a clip still waits: live first
+        self.assertTrue(transcriber.live_step(self.conn, self.models, "small.en"))
+        self.assertFalse(transcriber.live_step(self.conn, self.models, "small.en"))
+        while transcriber.final_step(self.conn, self.models, "large-v3-turbo"):
             pass
-        self.assertEqual(self.used, ["medium.en", "medium.en"])  # one step down; no upgrade until it's back at the best
-        self.assertEqual(db.clip_to_upgrade(self.conn, "large-v3-turbo")["start_ms"], 0)
-        self.assertIsNone(db.clip_to_upgrade(self.conn, "medium.en"))  # a model's own lines aren't redone
+        self.assertEqual(self.used, ["small.en", "small.en", "large-v3-turbo", "large-v3-turbo"])
+        self.assertEqual(self.rows(), [(0, "Hello from large-v3-turbo.", None, "large-v3-turbo"),
+                                       (2000, "Hello from large-v3-turbo.", None, "large-v3-turbo")])
 
-    def test_calls_still_recording_and_noise_are_never_upgraded(self):
-        live = self.call(int(time.time()), ended=False)
-        self.clip(live, 0)
-        done = self.call(int(time.time()) - 600)
-        self.clip(done, 0)
-        with self.conn:
-            self.conn.execute("UPDATE voice_clips SET text = 'hi', model = 'small.en' WHERE call_id = ?", (live,))
-            self.conn.execute("UPDATE voice_clips SET text = '', model = 'small.en' WHERE call_id = ?", (done,))
-        self.assertIsNone(db.clip_to_upgrade(self.conn, "large-v3-turbo"))
-
-    def test_a_failed_upgrade_keeps_the_old_text(self):
+    def test_noise_old_and_failed_lines_are_not_rewritten(self):
         call_id = self.call(int(time.time()) - 600)
-        self.clip(call_id, 0, ms=300)
+        for start in (0, 2000, 4000):
+            self.clip(call_id, start)
+        self.clip(call_id, 6000, ms=300)  # too short for the fake model
         with self.conn:
-            self.conn.execute("UPDATE voice_clips SET text = 'hi', model = 'small.en'")
-        transcriber.do_clip(self.conn, FakeModel("large-v3-turbo"), "large-v3-turbo", db.clip_to_upgrade(self.conn, "large-v3-turbo"), upgrade=True)
-        self.assertEqual(self.rows(), [(0, "hi", None, "small.en")])
+            self.conn.execute("UPDATE voice_clips SET text = '', model = 'small.en' WHERE start_ms = 0")  # only noise
+            self.conn.execute("UPDATE voice_clips SET text = 'old', model = NULL WHERE start_ms = 2000")  # before models were tracked
+            self.conn.execute("UPDATE voice_clips SET text = 'done', model = 'large-v3-turbo' WHERE start_ms = 4000")
+            self.conn.execute("UPDATE voice_clips SET text = 'hi', model = 'small.en' WHERE start_ms = 6000")
+        self.assertTrue(transcriber.final_step(self.conn, self.models, "large-v3-turbo"))  # the short clip fails
+        self.assertFalse(transcriber.final_step(self.conn, self.models, "large-v3-turbo"))  # and isn't retried
+        self.assertEqual(self.rows()[3], (6000, "hi", "RuntimeError('too short')", "small.en"))  # keeps the live text
+        self.assertEqual(self.used, ["large-v3-turbo"])
+
+    def test_a_failed_live_clip_shows_its_error(self):
+        self.clip(self.call(int(time.time())), 0, ms=300)
+        transcriber.live_step(self.conn, self.models, "small.en")
+        self.assertEqual(self.rows(), [(0, None, "RuntimeError('too short')", None)])
+        self.assertEqual(db.untranscribed_clips(self.conn), [])
 
 
 class Migration(unittest.TestCase):
