@@ -128,7 +128,7 @@ class Embed(unittest.TestCase):
 class SiteLinks(unittest.IsolatedAsyncioTestCase):  # discord.ui.View needs a running event loop
     async def test_author_and_buttons_link_to_the_site(self):
         for post in ({"embed": discord.Embed()}, {"embeds": [discord.Embed(), discord.Embed()]}):
-            embed = post.get("embed") or post["embeds"][0]
+            embed = post["embeds"][0] if "embeds" in post else post["embed"]  # empty Embeds are falsy since 2.7
             embed.set_author(name="craft", icon_url="https://x/a.png")
             add_site_links(post, {"match_id": 7, "hero_id": 3}, 55, "Celeste")
             self.assertEqual(embed.author.url, f"{SITE_URL}/#players/55")

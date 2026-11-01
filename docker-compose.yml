@@ -47,5 +47,13 @@ services:
     volumes:
       - pitboss-data:/app/data
 
+  # voice clips to text; its own service so the CPU work never slows the bot
+  transcriber:
+    build: .
+    command: ["python", "-u", "transcriber.py"]
+    restart: unless-stopped
+    volumes:
+      - pitboss-data:/app/data
+
 volumes:
   pitboss-data:
