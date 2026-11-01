@@ -69,9 +69,10 @@ function pause(){pos=now();playing=false;gen++;srcs.forEach(s=>{try{s.stop()}cat
 function seek(ms){const p=playing;if(p)pause();pos=Math.min(Math.max(0,ms),LEN);if(p)play();ui()}
 function ui(){const t=now();$('cur').textContent=fmt(t);$('left').textContent='-'+fmt(LEN-t);if(!dragging)$('bar').value=t;
  $('pp').textContent=playing?'❚❚':'▶';
- const on=lines.findLast(l=>+l.dataset.s<=t&&t<+l.dataset.e+500)||null;
- if(on!==lit){if(lit)lit.classList.remove('on');if(on)on.classList.add('on');lit=on;
-  if(on&&playing&&$('follow').checked)on.scrollIntoView({block:'center',behavior:'smooth'})}}
+ const on=lines.filter(l=>+l.dataset.s<=t&&t<+l.dataset.e+500);
+ lines.forEach(l=>l.classList.toggle('on',on.includes(l)));
+ const newest=on.at(-1)||null;  // people talking over each other all light up; follow the one who started last
+ if(newest!==lit){lit=newest;if(newest&&playing&&$('follow').checked)newest.scrollIntoView({block:'center',behavior:'smooth'})}}
 setInterval(()=>{if(playing){if(now()>=LEN){pause();pos=LEN}else queue()}ui()},250);
 $('pp').onclick=()=>playing?pause():play();$('back').onclick=()=>seek(now()-15000);$('fwd').onclick=()=>seek(now()+15000);
 $('bar').oninput=()=>{dragging=true;$('cur').textContent=fmt(+$('bar').value)};$('bar').onchange=()=>{dragging=false;seek(+$('bar').value)};
@@ -916,7 +917,7 @@ main.wide{max-width:none}
 .av.mini{width:26px;height:26px;margin-left:-7px;border:2px solid var(--bg);vertical-align:middle}.faces{margin-left:14px;padding-left:7px}
 .mh{display:flex;gap:8px;align-items:baseline}.mh b{font-size:15px}
 .tt{color:var(--mu);font-size:12px;font-variant-numeric:tabular-nums;background:none;border:0;padding:0}button.tt{cursor:pointer}button.tt:hover{color:var(--tx)}
-.ln{margin:4px 0 0 -8px;padding:3px 8px;border-radius:6px;cursor:pointer;line-height:1.55}.ln:hover{background:var(--card)}
+.msg>div{min-width:0}.ln{margin:4px 0 0 -8px;padding:3px 8px;border-radius:6px;cursor:pointer;line-height:1.55;overflow-wrap:anywhere}.ln:hover{background:var(--card)}
 .ln.on{background:rgba(240,195,90,.15)}.ln .wait{color:var(--mu)}
 .jl{font-size:12px;font-style:italic;color:var(--mu);padding:8px 0 8px 54px;border-bottom:1px solid var(--line)}
 #player{position:sticky;bottom:12px;margin-top:16px;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
