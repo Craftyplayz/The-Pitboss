@@ -1,10 +1,16 @@
 """Voice recording: cut each speaker's audio into one clip per sentence, so the transcriber can work while people talk."""
+import os
 import threading
 import time
 from pathlib import Path
 
 import av
 
+# next to the database, on the volume the bot, transcriber and control panel share
+VOICE_DIR = Path(os.environ.get("DB_PATH", "data/pitboss.db")).parent / "voice"
+# speech-to-text models picked in The Pitstop's Voice settings; only these, since a model name is a download
+MODELS = ("base.en", "small.en", "medium.en", "large-v3-turbo")
+DEFAULT_MODEL = "small.en"
 RATE = 48000
 BYTES_PER_MS = RATE * 2 * 2 // 1000  # Discord gives 48 kHz, 16-bit, stereo PCM
 GAP_MS = 800  # a pause this long ends a clip

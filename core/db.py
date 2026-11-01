@@ -335,6 +335,15 @@ def add_clip(conn, call_id, member_id, member_name, start_ms, duration_ms, file)
                      (call_id, member_id, member_name, start_ms, duration_ms, file))
 
 
+def untranscribed_clips(conn, limit=20):
+    return conn.execute("SELECT * FROM voice_clips WHERE text IS NULL AND error IS NULL ORDER BY id LIMIT ?", (limit,)).fetchall()
+
+
+def save_transcript(conn, clip_id, text=None, error=None):
+    with conn:
+        conn.execute("UPDATE voice_clips SET text = ?, error = ? WHERE id = ?", (text, error, clip_id))
+
+
 def autojoin_channels(conn):
     """Voice channel ids the bot joins on its own, set in The Pitstop's Voice settings."""
     return set(json.loads(get_setting(conn, "voice_autojoin") or "[]"))

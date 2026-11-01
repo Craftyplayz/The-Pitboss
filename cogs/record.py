@@ -1,9 +1,7 @@
 """Voice recording: /record start and stop, auto-join channels picked in The Pitstop, one .ogg clip per sentence for the transcriber."""
 import asyncio
 import logging
-import os
 import time
-from pathlib import Path
 
 import av
 import discord
@@ -13,9 +11,8 @@ from discord.ext import commands, tasks, voice_recv
 from cogs.logs import who
 from core import db
 from core.events import KINDS
-from core.voicerec import BYTES_PER_MS, Clipper, clip_path, encode_ogg, recordable
+from core.voicerec import BYTES_PER_MS, VOICE_DIR, Clipper, clip_path, encode_ogg, recordable
 
-VOICE_DIR = Path(os.environ.get("DB_PATH", "data/pitboss.db")).parent / "voice"
 STATUS = "🔴 Recording"  # shown under the channel name while recording
 
 logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.WARNING)  # Discord's timing reports aren't problems

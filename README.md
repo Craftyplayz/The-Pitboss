@@ -83,12 +83,13 @@ A dashboard at [pitboss.craftyplayz.com](https://pitboss.craftyplayz.com) with O
 
 ## Self-hosting
 
-The Pitboss is built for one Discord server. It runs as three services that share one SQLite database: the **bot** (`bot.py`), the **website** (`web.py`) and the **control panel**, The Pitstop (`dash.py`), where admins log in with Discord and change the bot's settings.
+The Pitboss is built for one Discord server. It runs as four services that share one SQLite database: the **bot** (`bot.py`), the **website** (`web.py`), the **control panel**, The Pitstop (`dash.py`), where admins log in with Discord and change the bot's settings, and the **transcriber** (`transcriber.py`), which turns recorded voice calls into text.
 
 ### Requirements
 - Docker and Docker Compose, **or** Python 3.12
 - A Discord bot token with the **Server Members**, **Message Content** and **Presence** privileged intents turned on in the Developer Portal (Bot page)
 - For the Server Log's audit entries (who kicked, banned or deleted what), give the bot the **View Audit Log** permission
+- For voice recording (`/record`), give the bot **Connect** and **Set Voice Channel Status**. The transcriber runs speech to text on the CPU; a 6-core CPU keeps up with live calls on the default model
 - For role menus, give the bot **Manage Roles** and put its role above the roles it hands out (plus **Manage Messages** so emoji menus can tidy reactions)
 
 ### 1. Configure
@@ -118,8 +119,9 @@ pip install -r requirements.txt
 python bot.py
 python web.py
 python dash.py
+python transcriber.py
 ```
-The database is stored at `data/pitboss.db` (change it with `DB_PATH`). Files the Server Log saves (attachments, avatars) go in `data/logfiles/`.
+The database is stored at `data/pitboss.db` (change it with `DB_PATH`). Files the Server Log saves (attachments, avatars) go in `data/logfiles/`, voice recordings in `data/voice/` and speech-to-text models in `data/whisper/`.
 
 ### 3. Set up the channels
 In Discord, run `/setup` and pick the recap forum, scrim log, patch notes, bot updates and welcome channels, and the voice hub. Change the welcome message with `/welcome`.
@@ -136,6 +138,7 @@ python -m unittest
 | `bot.py` | Starts the Discord bot |
 | `web.py`, `admin.py` | The website and the `/admin` page |
 | `dash.py` | The control panel: Discord login and bot settings |
+| `transcriber.py` | Turns recorded voice clips into text |
 | `cogs/` | Bot commands and background tasks (recaps, scrims, patch notes, bot updates, the Server Log, role menus) |
 | `core/` | Shared code: Deadlock API client, database, stats, graphs, trophies |
 | `pages/`, `static/` | Website page and images |
