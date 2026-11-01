@@ -5,6 +5,7 @@ Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 i
 ### Unreleased
 
 - Updated the bot's Discord library to the newest version, which supports Discord's new encrypted voice calls.
+- New /record command: the bot joins your voice channel and records it for transcripts. It can also join set channels by itself.
 
 ## 1.8.0
 

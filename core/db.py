@@ -78,6 +78,28 @@ CREATE TABLE IF NOT EXISTS role_menu_options (
     description TEXT,
     PRIMARY KEY (menu_id, position)
 );
+CREATE TABLE IF NOT EXISTS voice_calls (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    recorder_id  INTEGER NOT NULL,  -- the bot account recording it, so more recorder bots can share the table later
+    channel_id   INTEGER NOT NULL,
+    channel_name TEXT NOT NULL,
+    started_by   INTEGER,           -- member who ran /record start; NULL when auto-joined
+    started_at   INTEGER NOT NULL,  -- unix seconds
+    ended_at     INTEGER,
+    status       TEXT NOT NULL      -- recording, done, interrupted (bot restarted mid-call)
+);
+CREATE TABLE IF NOT EXISTS voice_clips (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    call_id     INTEGER NOT NULL,
+    member_id   INTEGER NOT NULL,
+    member_name TEXT NOT NULL,
+    start_ms    INTEGER NOT NULL,  -- from the start of the call
+    duration_ms INTEGER NOT NULL,
+    file        TEXT NOT NULL,     -- relative to the voice folder
+    text        TEXT,              -- NULL until transcribed
+    error       TEXT
+);
+CREATE INDEX IF NOT EXISTS voice_clips_call ON voice_clips (call_id, start_ms);
 """
 
 
@@ -279,6 +301,43 @@ def role_menus(conn):
 
 def menu_options(conn, menu_id):
     return [dict(r) for r in conn.execute("SELECT * FROM role_menu_options WHERE menu_id = ? ORDER BY position", (menu_id,))]
+
+
+def start_call(conn, recorder_id, channel, started_by, at):
+    with conn:
+        return conn.execute("INSERT INTO voice_calls (recorder_id, channel_id, channel_name, started_by, started_at, status) "
+                            "VALUES (?, ?, ?, ?, ?, 'recording')", (recorder_id, channel.id, channel.name, started_by, at)).lastrowid
+
+
+def end_call(conn, call_id, at, status="done"):
+    with conn:
+        conn.execute("UPDATE voice_calls SET ended_at = ?, status = ? WHERE id = ?", (at, status, call_id))
+
+
+def interrupt_calls(conn, recorder_id, at):
+    """Calls this recorder left as `recording` when it stopped; their clips so far are kept. Returns their channel ids."""
+    channels = [r["channel_id"] for r in conn.execute(
+        "SELECT channel_id FROM voice_calls WHERE recorder_id = ? AND status = 'recording'", (recorder_id,))]
+    with conn:
+        conn.execute("UPDATE voice_calls SET ended_at = ?, status = 'interrupted' WHERE recorder_id = ? AND status = 'recording'",
+                     (at, recorder_id))
+    return channels
+
+
+def recording_in(conn, channel_id):
+    """The call in progress in this channel, by any recorder bot."""
+    return conn.execute("SELECT * FROM voice_calls WHERE channel_id = ? AND status = 'recording'", (channel_id,)).fetchone()
+
+
+def add_clip(conn, call_id, member_id, member_name, start_ms, duration_ms, file):
+    with conn:
+        conn.execute("INSERT INTO voice_clips (call_id, member_id, member_name, start_ms, duration_ms, file) VALUES (?, ?, ?, ?, ?, ?)",
+                     (call_id, member_id, member_name, start_ms, duration_ms, file))
+
+
+def autojoin_channels(conn):
+    """Voice channel ids the bot joins on its own, set in The Pitstop's Voice settings."""
+    return set(json.loads(get_setting(conn, "voice_autojoin") or "[]"))
 
 
 def delete_menu(conn, menu_id):

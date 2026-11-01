@@ -25,7 +25,7 @@ KINDS = {
     "member_updated": "member_changes",
     "user_updated": "profile",
     "presence_updated": "presence",
-    "voice_updated": "voice",
+    **dict.fromkeys(["voice_updated", "voice_recording_started", "voice_recording_stopped"], "voice"),
     **dict.fromkeys(["channel_created", "channel_deleted", "channel_updated",
                      "thread_created", "thread_deleted", "thread_updated"], "channels"),
     **dict.fromkeys(["role_created", "role_deleted", "role_updated"], "roles"),
