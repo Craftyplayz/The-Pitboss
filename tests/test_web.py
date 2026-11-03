@@ -53,6 +53,14 @@ class Dashboard(unittest.TestCase):
         self.assertEqual(len(a["sg"]), GRAPH)
         self.assertEqual(a["sg"][-1], [NOW - 50, 1000, 0])  # oldest -> newest
 
+    def test_street_brawl_left_out_of_win_rate(self):
+        sb = {**hist(2, 50), "game_mode": 4}
+        p = player_entry(1, {}, 0, [hist(1, 100, win=False), sb], NOW - 1000, [], [], [], set(), {})
+        self.assertEqual((p["n"], p["w"], p["wn"], p["ww"]), (2, 1, 1, 0))
+        self.assertEqual([r[10] for r in p["al"]["g"]], [1, 0])
+        sm, _ = server_matches([{"id": 1}], {1: [sb, hist(1, 100)]}, NOW)
+        self.assertEqual([m["sb"] for m in sm], [1, 0])
+
     def test_player_entry_without_recent_matches(self):
         p = player_entry(1, {}, 0, [hist(1, 90 * 86400)], NOW - 30 * 86400, [], [], [], set(), {})
         self.assertEqual((p["n"], p["g"], p["form"], p["spm"], p["al"]["n"]), (0, [], [], 0, 1))
@@ -180,7 +188,7 @@ class PlayerMatches(unittest.IsolatedAsyncioTestCase):
         rows, calls, _ = await self.fetch(55, {"page": "1"})
         self.assertEqual([r[0] for r in rows], list(range(31, 41)))
         self.assertEqual(calls, ["/v1/players/55/match-history"])
-        self.assertEqual(len(rows[0]), 10)  # the page's row shape
+        self.assertEqual(len(rows[0]), 11)  # the page's row shape
 
     async def test_history_is_cached(self):
         _, calls, request = await self.fetch(55, {})

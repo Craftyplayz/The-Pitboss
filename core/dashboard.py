@@ -69,14 +69,21 @@ def _people(rows, id_key, linked, profiles, limit=PEOPLE_SHOWN):
     return out
 
 
+STREET_BRAWL = 4  # match-history game_mode (deadlock-api's ECitadelGameMode enum: 1 = Normal, 4 = Street Brawl)
+
+
+def brawl(m):
+    return int(m.get("game_mode") == STREET_BRAWL)
+
+
 PAGE = 30  # match rows per page in a profile's match list
 GRAPH = 50  # matches in a profile's souls/min graph
 
 
 def match_row(m):
-    """A match as the page's row: [id, hero, start, kills, deaths, assists, souls, seconds, win, last hits]."""
+    """A match as the page's row: [id, hero, start, kills, deaths, assists, souls, seconds, win, last hits, street brawl]."""
     return [m["match_id"], m["hero_id"], m["start_time"], m["player_kills"], m["player_deaths"], m["player_assists"],
-            m["net_worth"], m["match_duration_s"], int(won(m)), m["last_hits"]]
+            m["net_worth"], m["match_duration_s"], int(won(m)), m["last_hits"], brawl(m)]
 
 
 def history_page(history, page):
@@ -86,7 +93,8 @@ def history_page(history, page):
 
 
 def _totals(games):
-    """Record, K/D/A totals, souls/min and [hero, games, wins, k, d, a] per hero, most played first."""
+    """Record, K/D/A totals, souls/min and [hero, games, wins, k, d, a] per hero, most played first.
+    wn/ww: games and wins without Street Brawl, which the profile's win rates use."""
     by_hero = defaultdict(lambda: [0, 0, 0, 0, 0])
     for m in games:
         h = by_hero[m["hero_id"]]
@@ -96,8 +104,9 @@ def _totals(games):
         h[3] += m["player_deaths"]
         h[4] += m["player_assists"]
     minutes = sum(m["match_duration_s"] for m in games) / 60
+    normal = [m for m in games if not brawl(m)]
     return {
-        "n": len(games), "w": sum(won(m) for m in games),
+        "n": len(games), "w": sum(won(m) for m in games), "wn": len(normal), "ww": sum(won(m) for m in normal),
         "k": sum(m["player_kills"] for m in games), "d": sum(m["player_deaths"] for m in games),
         "a": sum(m["player_assists"] for m in games),
         "spm": round(sum(m["net_worth"] for m in games) / minutes) if minutes else 0,
@@ -159,7 +168,7 @@ def server_matches(players, histories, now, days=30):
     for p in players:
         for m in histories[p["id"]]:
             e = matches.setdefault(m["match_id"], {"id": m["match_id"], "t": m["start_time"], "dur": m["match_duration_s"],
-                                                   "win": None, "pl": []})
+                                                   "win": None, "sb": brawl(m), "pl": []})
             e["pl"].append([p["id"], m["hero_id"], m["player_kills"], m["player_deaths"], m["player_assists"],
                             m["net_worth"], int(won(m))])
     per_day = [0] * days

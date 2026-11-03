@@ -11,6 +11,10 @@ Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 i
 - Transcripts appear straight away from a fast model, then get rewritten by a more accurate one as soon as the server has time.
 - The Pitstop's Voice tab shows each recorded call's transcript, lets admins replay any line, and picks which channels the bot records by itself.
 
+## 1.8.1
+
+- New Street Brawl tab on the website lists Street Brawl matches on their own, and they no longer count toward win rates on player profiles.
+
 ## 1.8.0
 
 - Role menus: pick your own roles by clicking a button, choosing from a dropdown or reacting with an emoji. Click again to drop a role.
