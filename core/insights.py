@@ -1,4 +1,6 @@
 """Insights: rule-based comparisons over match-history entries (newest first). Pure functions."""
+from core.shared import brawl
+
 MIN_HISTORY = 10  # matches needed before any Insight shows
 MIN_HERO = 5  # matches on one hero before it can be "best" or "worst"
 MIN_STREAK = 3
@@ -32,13 +34,14 @@ def _streak(history):
 def profile_insights(history, hero_names):
     if len(history) < MIN_HISTORY:
         return []
-    avg = sum(map(_won, history)) / len(history)
+    normal = [m for m in history if not brawl(m)]  # Street Brawl stays out of win rates
     heroes = {}
-    for m in history:
+    for m in normal:
         heroes.setdefault(m["hero_id"], []).append(_won(m))
     rates = {h: (sum(w) / len(w), len(w)) for h, w in heroes.items() if len(w) >= MIN_HERO}
     out = []
     if rates:
+        avg = sum(map(_won, normal)) / len(normal)
         best = max(rates, key=lambda h: rates[h][0])
         worst = min(rates, key=lambda h: rates[h][0])
         for h, word, sign in ((best, "Best", 1), (worst, "Worst", -1)):
@@ -64,7 +67,7 @@ def match_insights(match, history, hero_names):
     spm, avg_spm = _spm([match]), _spm(others)
     if avg_spm and abs(spm - avg_spm) / avg_spm >= STAT_GAP:
         out.append(f"{spm:.0f} souls/min, {'above' if spm > avg_spm else 'below'} your average of {avg_spm:.0f}.")
-    same = [m for m in others if m["hero_id"] == match["hero_id"]]
+    same = [m for m in others if m["hero_id"] == match["hero_id"] and not brawl(m)]
     if len(same) >= MIN_HERO:
         wr = sum(map(_won, same)) / len(same)
         name = hero_names.get(match["hero_id"], f"Hero {match['hero_id']}")

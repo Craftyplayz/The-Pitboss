@@ -4,7 +4,7 @@ import time
 import discord
 
 from core.insights import profile_insights
-from core.shared import SITE_URL, WINDOW_DAYS, won
+from core.shared import SITE_URL, WINDOW_DAYS, brawl, won
 
 ROLL = 10  # Matches in the rolling win rate
 TOP_HEROES = 5
@@ -99,6 +99,7 @@ def trend(history, ranked):
         ticks = [(1, _date(ms[0]["start_time"])), (len(ms), _date(ms[-1]["start_time"]))]
         return points, f"Rank progress · {WINDOW_DAYS} days", dict(
             x_ticks=ticks, origin=(0, 0), midline=0, y_label=lambda v: f"{v:+,}" if v else "0")
+    ms = [m for m in ms if not brawl(m)]
     if len(ms) < ROLL:
         return None
     points = [(i, round(sum(map(won, ms[i - ROLL:i])) / ROLL * 100)) for i in range(ROLL, len(ms) + 1)]
@@ -134,7 +135,9 @@ def build_profile_embed(member, account_id, steam, rank_text, rank_icon, history
     mins = max(sum(m["match_duration_s"] for m in history) / 60, 1)
     avg = lambda key: sum(m[key] for m in history) / n
     add = embed.add_field
-    add(name=f"Record · {WINDOW_DAYS} days", value=f"{wins}W – {n - wins}L · {wins / n:.1%}")
+    normal = [m for m in history if not brawl(m)]  # the % leaves Street Brawl out, the record doesn't
+    rate = f" · {sum(map(won, normal)) / len(normal):.1%}" if normal else ""
+    add(name=f"Record · {WINDOW_DAYS} days", value=f"{wins}W – {n - wins}L{rate}")
     add(name="KDA", value=f"{kda(history):.2f} · {avg('player_kills'):.1f} / {avg('player_deaths'):.1f} / {avg('player_assists'):.1f}")
     add(name="Souls / min", value=f"{sum(m['net_worth'] for m in history) / mins:,.0f} · "
                                    f"{sum(m['last_hits'] for m in history) / mins:.1f} LH/min")

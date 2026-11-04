@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 
 from core.match import final_build
-from core.shared import item_icon, won
+from core.shared import brawl, item_icon, won
 from core.trophies import FAMILIES, MASTERY, META_FAMILIES, rarity
 
 # order matches the page's souls-by-source legend: lane creeps, neutrals, heroes, bosses, treasure, denies
@@ -69,13 +69,6 @@ def _people(rows, id_key, linked, profiles, limit=PEOPLE_SHOWN):
     return out
 
 
-STREET_BRAWL = 4  # match-history game_mode (deadlock-api's ECitadelGameMode enum: 1 = Normal, 4 = Street Brawl)
-
-
-def brawl(m):
-    return int(m.get("game_mode") == STREET_BRAWL)
-
-
 PAGE = 30  # match rows per page in a profile's match list
 GRAPH = 50  # matches in a profile's souls/min graph
 
@@ -93,9 +86,9 @@ def history_page(history, page):
 
 
 def _totals(games):
-    """Record, K/D/A totals, souls/min and [hero, games, wins, k, d, a] per hero, most played first.
-    wn/ww: games and wins without Street Brawl, which the profile's win rates use."""
-    by_hero = defaultdict(lambda: [0, 0, 0, 0, 0])
+    """Record, K/D/A totals, souls/min and [hero, games, wins, k, d, a, wn, ww] per hero, most played first.
+    wn/ww: games and wins without Street Brawl, which win rates use."""
+    by_hero = defaultdict(lambda: [0, 0, 0, 0, 0, 0, 0])
     for m in games:
         h = by_hero[m["hero_id"]]
         h[0] += 1
@@ -103,6 +96,9 @@ def _totals(games):
         h[2] += m["player_kills"]
         h[3] += m["player_deaths"]
         h[4] += m["player_assists"]
+        if not brawl(m):
+            h[5] += 1
+            h[6] += won(m)
     minutes = sum(m["match_duration_s"] for m in games) / 60
     normal = [m for m in games if not brawl(m)]
     return {

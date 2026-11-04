@@ -30,6 +30,14 @@ def item_icon(item):
     return image or item.get("shop_image") or ""
 
 
+STREET_BRAWL = 4  # match-history game_mode (deadlock-api's ECitadelGameMode enum: 1 = Normal, 4 = Street Brawl)
+
+
+def brawl(match):
+    """1 if this match-history entry is Street Brawl, which win rates leave out."""
+    return int(match.get("game_mode") == STREET_BRAWL)
+
+
 def won(match):
     """True if the Player won this match-history entry."""
     return match["match_result"] == match["player_team"]

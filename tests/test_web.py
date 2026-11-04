@@ -58,6 +58,7 @@ class Dashboard(unittest.TestCase):
         p = player_entry(1, {}, 0, [hist(1, 100, win=False), sb], NOW - 1000, [], [], [], set(), {})
         self.assertEqual((p["n"], p["w"], p["wn"], p["ww"]), (2, 1, 1, 0))
         self.assertEqual([r[10] for r in p["al"]["g"]], [1, 0])
+        self.assertEqual(p["hero"][0][6:], [1, 0])  # the hero's wn, ww
         sm, _ = server_matches([{"id": 1}], {1: [sb, hist(1, 100)]}, NOW)
         self.assertEqual([m["sb"] for m in sm], [1, 0])
 

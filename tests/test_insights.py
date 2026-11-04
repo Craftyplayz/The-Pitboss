@@ -40,3 +40,19 @@ class Insights(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StreetBrawl(unittest.TestCase):
+    def entry(self, match_id, hero, win, mode=1):
+        return {"match_id": match_id, "hero_id": hero, "match_result": 0 if win else 1, "player_team": 0, "game_mode": mode,
+                "start_time": 1000 - match_id, "player_kills": 1, "player_deaths": 1, "player_assists": 1, "net_worth": 1000,
+                "match_duration_s": 600}
+
+    def test_win_rate_insights_leave_it_out(self):
+        normal = [self.entry(i, 1, i % 2 == 0) for i in range(6)] + [self.entry(i + 6, 2, False) for i in range(6)]
+        brawls = [self.entry(100 + i, 2, True, mode=4) for i in range(20)]
+        self.assertIn("Worst hero: B at 0%", " ".join(profile_insights(brawls + normal, {1: "A", 2: "B"})))
+
+    def test_only_street_brawl_has_no_hero_insight(self):
+        brawls = [self.entry(i, 2, True, mode=4) for i in range(12)]
+        self.assertNotIn("hero:", " ".join(profile_insights(brawls, {2: "B"})))

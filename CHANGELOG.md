@@ -11,6 +11,11 @@ Versions before 1.0 were built before The Pitboss moved to its new server. 1.0 i
 - Transcripts appear straight away from a fast model, then get rewritten by a more accurate one as soon as the server has time.
 - The Pitstop's Voice tab shows each recorded call's transcript, lets admins replay any line, and picks which channels the bot records by itself.
 
+## 1.8.3
+
+- Street Brawl matches no longer count toward any win rate, on the website or in /profile and match recaps.
+- Player profiles show a separate Street Brawl win rate once a player has 10 Street Brawl matches.
+
 ## 1.8.2
 
 - Street Brawl matches no longer count toward win rate on the Leaderboards tab.
