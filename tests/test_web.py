@@ -25,7 +25,7 @@ class Dashboard(unittest.TestCase):
         profile = {"personaname": '<img src=x onerror="alert(1)">', "avatarmedium": 'https://a/"x', "countrycode": None}
         mates = [{"mate_id": 9, "matches_played": 3, "wins": 2}, {"mate_id": 2, "matches_played": 9, "wins": 9}]
         p = player_entry(1, profile, 103, [hist(1, 100), hist(2, 50, win=False, hero=2)], NOW - 1000, HERO_STATS, mates, [],
-                         {1, 2}, {9: {"personaname": "<b>"}})
+                         {9: {"personaname": "<b>"}})
         self.assertNotIn("<", p["name"])
         self.assertNotIn('"', p["av"])
         self.assertEqual((p["tier"], p["sub"]), (10, 3))
@@ -33,14 +33,14 @@ class Dashboard(unittest.TestCase):
         self.assertEqual(p["form"], [1, 0])  # oldest -> newest
         self.assertEqual(p["g"][0][0], 2)  # newest first
         self.assertEqual(p["spm"], 1000)
-        self.assertEqual([m[0] for m in p["mate"]], [9])  # Linked Player 2 is excluded
-        self.assertEqual(p["mate"][0][1], "&lt;b&gt;")
+        self.assertEqual([m[0] for m in p["mate"]], [2, 9])  # most games first, Linked Players included
+        self.assertEqual(p["mate"][1][1], "&lt;b&gt;")
         self.assertEqual((p["dpm"], p["acc"], p["at"]), (800, 42, 10))
-        self.assertIsNone(player_entry(1, profile, 0, [], 0, [], [], [], set(), {}))
+        self.assertIsNone(player_entry(1, profile, 0, [], 0, [], [], [], {}))
 
     def test_player_entry_all_time_vs_window(self):
         old = [hist(i, 90 * 86400 + i, win=i % 2 == 0, k=i) for i in range(1, 61)]  # 60 old Matches, 1 newest
-        p = player_entry(1, {}, 0, [hist(100, 50, win=False, hero=2), *old], NOW - 30 * 86400, [], [], [], set(), {})
+        p = player_entry(1, {}, 0, [hist(100, 50, win=False, hero=2), *old], NOW - 30 * 86400, [], [], [], {})
         self.assertEqual((p["n"], p["w"], p["g"][0][0], p["form"]), (1, 0, 100, [0]))  # window: one Match
         a = p["al"]
         self.assertEqual((a["n"], a["w"], a["k"]), (61, 30, 5 + sum(range(1, 61))))
@@ -55,7 +55,7 @@ class Dashboard(unittest.TestCase):
 
     def test_street_brawl_left_out_of_win_rate(self):
         sb = {**hist(2, 50), "game_mode": 4}
-        p = player_entry(1, {}, 0, [hist(1, 100, win=False), sb], NOW - 1000, [], [], [], set(), {})
+        p = player_entry(1, {}, 0, [hist(1, 100, win=False), sb], NOW - 1000, [], [], [], {})
         self.assertEqual((p["n"], p["w"], p["wn"], p["ww"]), (2, 1, 1, 0))
         self.assertEqual([r[10] for r in p["al"]["g"]], [1, 0])
         self.assertEqual(p["hero"][0][6:], [1, 0])  # the hero's wn, ww
@@ -63,7 +63,7 @@ class Dashboard(unittest.TestCase):
         self.assertEqual([m["sb"] for m in sm], [1, 0])
 
     def test_player_entry_without_recent_matches(self):
-        p = player_entry(1, {}, 0, [hist(1, 90 * 86400)], NOW - 30 * 86400, [], [], [], set(), {})
+        p = player_entry(1, {}, 0, [hist(1, 90 * 86400)], NOW - 30 * 86400, [], [], [], {})
         self.assertEqual((p["n"], p["g"], p["form"], p["spm"], p["al"]["n"]), (0, [], [], 0, 1))
 
     def test_history_page(self):

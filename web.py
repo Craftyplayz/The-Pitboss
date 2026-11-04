@@ -78,8 +78,8 @@ async def build_dashboard(app):
 
     linked = set(ids)
     # only the mates / rivals the page shows need names; the full lists can run to thousands
-    others = sorted({r["mate_id"] for rows in mates.values() for r in dash.top_people(rows, "mate_id", linked)}
-                    | {r["enemy_id"] for rows in enemies.values() for r in dash.top_people(rows, "enemy_id", linked)})
+    others = sorted(({r["mate_id"] for rows in mates.values() for r in dash.top_people(rows)}
+                     | {r["enemy_id"] for rows in enemies.values() for r in dash.top_people(rows)}) - linked)
     chunks = [others[i:i + 1000] for i in range(0, len(others), 1000)]  # the API's account_ids limit
     other_steam = [p for found in await asyncio.gather(
         *[_safe(api.get("/v1/players/steam", account_ids=",".join(map(str, c))), []) for c in chunks]) for p in found]
@@ -87,7 +87,7 @@ async def build_dashboard(app):
     badges = {r["account_id"]: r.get("badge") or 0 for r in rank_rows}
 
     players = [dash.player_entry(a, profiles.get(a), badges.get(a, 0), full[a], since,
-                                 [r for r in hero_stats if r["account_id"] == a], mates[a], enemies[a], linked, profiles)
+                                 [r for r in hero_stats if r["account_id"] == a], mates[a], enemies[a], profiles)
                for a in ids]
     players = [p for p in players if p]  # a Linked Player with no Match at all has nothing to show
     heroes, items = await api.heroes(), await api.items()

@@ -53,14 +53,14 @@ def item_info(item):
 PEOPLE_SHOWN = 6  # mates / rivals listed per Player
 
 
-def top_people(rows, id_key, linked, limit=PEOPLE_SHOWN):
-    """The mates or enemies the page shows: most games first, Linked Players left out."""
-    return sorted((r for r in rows if r[id_key] not in linked), key=lambda r: -r["matches_played"])[:limit]
+def top_people(rows, limit=PEOPLE_SHOWN):
+    """The mates or enemies the page shows: most games first."""
+    return sorted(rows, key=lambda r: -r["matches_played"])[:limit]
 
 
-def _people(rows, id_key, linked, profiles, limit=PEOPLE_SHOWN):
-    """Top mates or enemies by games, excluding Linked Players: [id, name, avatar, games, wins]."""
-    rows = top_people(rows, id_key, linked, limit)
+def _people(rows, id_key, profiles, limit=PEOPLE_SHOWN):
+    """Top mates or enemies by games: [id, name, avatar, games, wins]."""
+    rows = top_people(rows, limit)
     out = []
     for r in rows:
         prof = profiles.get(r[id_key]) or {}
@@ -127,7 +127,7 @@ def all_time(games):
     }
 
 
-def player_entry(account_id, profile, badge, history, since, hero_stats, mates, enemies, linked, profiles):
+def player_entry(account_id, profile, badge, history, since, hero_stats, mates, enemies, profiles):
     """One Linked Player's entry, or None if `history` (their full match history) is empty.
 
     The top-level numbers cover Matches since `since` (the Leaderboard Window); "al" covers every Match.
@@ -146,8 +146,8 @@ def player_entry(account_id, profile, badge, history, since, hero_stats, mates, 
         "form": [int(won(m)) for m in reversed(recent[:20])],  # oldest -> newest
         "g": [match_row(m) for m in recent],
         "al": all_time(games),
-        "mate": _people(mates, "mate_id", linked, profiles),
-        "enem": _people(enemies, "enemy_id", linked, profiles),
+        "mate": _people(mates, "mate_id", profiles),
+        "enem": _people(enemies, "enemy_id", profiles),
         # all-time numbers from /v1/players/hero-stats
         "dpm": round(_weighted(hero_stats, "damage_per_min")),
         "lhpm": round(_weighted(hero_stats, "last_hits_per_min"), 1),
